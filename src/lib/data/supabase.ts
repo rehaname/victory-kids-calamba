@@ -1,5 +1,6 @@
 import { assertEligibleAge, getAgePool } from "@/lib/age";
 import type { KidsRepository } from "@/lib/data/repository";
+import { toError } from "@/lib/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Attendance,
@@ -10,6 +11,10 @@ import type {
   RegisterInput,
   Session,
 } from "@/lib/types";
+
+function throwDb(error: unknown, fallback: string): never {
+  throw toError(error, fallback);
+}
 
 type ParentRow = {
   id: string;
@@ -85,21 +90,25 @@ function mapSession(row: SessionRow): Session {
 
 function mapAttendance(row: AttendanceRow): AttendanceWithChild | null {
   const childRow = Array.isArray(row.children) ? row.children[0] : row.children;
-  if (!childRow) throw new Error("Child missing for attendance");
-  const child = mapChild(childRow);
-  const agePool = getAgePool(child.birthday);
-  if (!agePool) return null;
-  return {
-    id: row.id,
-    sessionId: row.session_id,
-    childId: row.child_id,
-    timeIn: row.time_in,
-    timeOut: row.time_out,
-    claimantName: row.claimant_name,
-    rfidTagId: row.rfid_tag_id,
-    child,
-    agePool,
-  };
+  if (!childRow) return null;
+  try {
+    const child = mapChild(childRow);
+    const agePool = getAgePool(child.birthday);
+    if (!agePool) return null;
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      childId: row.child_id,
+      timeIn: row.time_in,
+      timeOut: row.time_out,
+      claimantName: row.claimant_name,
+      rfidTagId: row.rfid_tag_id,
+      child,
+      agePool,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function db() {
@@ -116,7 +125,7 @@ export const supabaseRepository: KidsRepository = {
       .select("*")
       .eq("status", "open")
       .maybeSingle();
-    if (error) throw error;
+    if (error) throwDb(error, "Could not load open session");
     return data ? mapSession(data as SessionRow) : null;
   },
 
@@ -126,7 +135,7 @@ export const supabaseRepository: KidsRepository = {
       .from("sessions")
       .select("*")
       .order("started_at", { ascending: false });
-    if (error) throw error;
+    if (error) throwDb(error, "Could not load sessions");
     return ((data ?? []) as SessionRow[]).map(mapSession);
   },
 
@@ -137,7 +146,7 @@ export const supabaseRepository: KidsRepository = {
       .insert({ status: "open" })
       .select("*")
       .single();
-    if (error) throw error;
+    if (error) throwDb(error, "Could not start session");
     return mapSession(data as SessionRow);
   },
 
@@ -150,7 +159,7 @@ export const supabaseRepository: KidsRepository = {
       .eq("status", "open")
       .select("*")
       .single();
-    if (error) throw error;
+    if (error) throwDb(error, "Could not close session");
     return mapSession(data as SessionRow);
   },
 
@@ -171,7 +180,7 @@ export const supabaseRepository: KidsRepository = {
     }
 
     const { data, error } = await req;
-    if (error) throw error;
+    if (error) throwDb(error, "Could not search children");
     const rows = ((data ?? []) as ChildRow[]).map((row) => mapChild(row));
 
     if (!q) return rows;
@@ -198,7 +207,7 @@ export const supabaseRepository: KidsRepository = {
       })
       .select("*")
       .single();
-    if (parentError) throw parentError;
+    if (parentError) throwDb(parentError, "Could not save parent");
 
     const parent = mapParent(parentRow as ParentRow);
     const { data: childRows, error: childError } = await supabase
@@ -213,7 +222,7 @@ export const supabaseRepository: KidsRepository = {
         })),
       )
       .select("*");
-    if (childError) throw childError;
+    if (childError) throwDb(childError, "Could not save children");
 
     const children: Child[] = ((childRows ?? []) as ChildRow[]).map((row) => {
       const mapped = mapChild(row, parent);
@@ -232,7 +241,7 @@ export const supabaseRepository: KidsRepository = {
       .eq("session_id", sessionId)
       .is("time_out", null)
       .order("time_in");
-    if (error) throw error;
+    if (error) throwDb(error, "Could not load active attendance");
     return ((data ?? []) as AttendanceRow[])
       .map(mapAttendance)
       .filter((row): row is AttendanceWithChild => row !== null);
@@ -245,7 +254,7 @@ export const supabaseRepository: KidsRepository = {
       .select("birthday")
       .eq("id", childId)
       .single();
-    if (childError) throw childError;
+    if (childError) throwDb(childError, "Could not load child");
     assertEligibleAge((childRow as { birthday: string }).birthday);
 
     const { data, error } = await supabase
@@ -253,7 +262,7 @@ export const supabaseRepository: KidsRepository = {
       .insert({ session_id: sessionId, child_id: childId })
       .select("*")
       .single();
-    if (error) throw error;
+    if (error) throwDb(error, "Could not check in child");
     const row = data as AttendanceRow;
     return {
       id: row.id,
@@ -280,7 +289,7 @@ export const supabaseRepository: KidsRepository = {
       .is("time_out", null)
       .select("*")
       .single();
-    if (error) throw error;
+    if (error) throwDb(error, "Could not check out child");
     const row = data as AttendanceRow;
     return {
       id: row.id,
@@ -300,7 +309,7 @@ export const supabaseRepository: KidsRepository = {
       .select("*, children(*, parents(*))")
       .eq("session_id", sessionId)
       .order("time_in");
-    if (error) throw error;
+    if (error) throwDb(error, "Could not load session history");
     return ((data ?? []) as AttendanceRow[])
       .map(mapAttendance)
       .filter((row): row is AttendanceWithChild => row !== null);
