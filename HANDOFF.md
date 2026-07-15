@@ -26,16 +26,18 @@ Build a simple staff-managed Kids Church check-in kiosk for Victory Calamba (iPa
 
 ## Views
 
-1. **Current Pool** — search, Time In, age groups 4–6 / 7–9 / 10–12, Time Out
-2. **Register** — parent + children first visit
-3. **History** — session attendance + CSV export
+1. **Kids Church pool (`/`)** — session start/close, age pools, check-in modal
+2. **Check-in modal** — search existing child or register new (session required)
+3. **History (`/history`)** — session attendance + CSV export
 
 Search/results must show child full name + parent full name as sub-label.
 
 ## What’s already done
 
 - Next.js App Router + Tailwind + shadcn UI scaffolded
-- Victory-branded kiosk UI in [`src/components/kiosk-app.tsx`](src/components/kiosk-app.tsx)
+- Victory-branded kiosk UI ([`src/components/kids-church-pool.tsx`](src/components/kids-church-pool.tsx))
+- History module at `/history`
+- Staff PIN gate ([`src/components/staff-pin-gate.tsx`](src/components/staff-pin-gate.tsx))
 - Domain model + memory repository for local demo
 - Supabase repository ready behind `KIDS_DATA_SOURCE=supabase`
 - Hardcoded tenant constants in [`src/lib/tenant.ts`](src/lib/tenant.ts):
@@ -71,15 +73,19 @@ Search/results must show child full name + parent full name as sub-label.
 - Vercel: `vercel.json` forces Next.js framework preset (fixes platform 404 on all URLs)
 - Production live: https://victory-kids-calamba.vercel.app
 
+### Staff PIN unlock (current branch)
+
+- 6-digit PIN stored in `public.profiles.remarks` for `victory_calamba` admin
+- Default PIN: **331616** (John 3:16) — church can update `remarks` anytime in Supabase
+- Asked on first open of a browser tab (`sessionStorage`); **not** asked again on refresh
+- Kids Church session stays open in DB across refresh / tab close; staff re-enters PIN then can Close session
+- SQL: [`supabase/sql/02_staff_pin_remarks.sql`](supabase/sql/02_staff_pin_remarks.sql)
+
 ## Remaining next steps
 
-### 1) Staff login UI (optional but recommended before public Vercel URL)
+### 1) Optional: harden PIN with a short-lived server cookie
 
-Kiosk currently uses **service-role on the server** (staff-owned device model). RLS policies already exist for `authenticated` + `profiles.tenant = 'victory_calamba'`.
-
-Prefer adding a minimal email/password gate using the staff user above, then switch repository reads/writes to the cookie session client in [`src/lib/supabase/server.ts`](src/lib/supabase/server.ts). Keep service role for admin/bootstrap only.
-
-Do **not** consume iosifin admin seats — seats are counted per `profiles.tenant` (max 2 admins per tenant via `claim_admin_seat`).
+Client `sessionStorage` unlock is enough for a staff-owned iPad. For stronger protection, set an httpOnly cookie after `verifyStaffPinAction` and check it in server actions.
 
 ### 2) Vercel env vars (if not already set in dashboard)
 
@@ -160,5 +166,5 @@ npm run provision:tenant   # idempotent; needs Management API token in env
 - [x] App builds with `KIDS_DATA_SOURCE=supabase` + service role wired
 - [x] Live DB E2E: session / register / check-in / check-out / close / history
 - [x] iosifin data untouched
-- [ ] Staff login UI (profile row already created)
+- [x] Staff PIN unlock (profiles.remarks; sessionStorage unlock)
 - [x] Vercel deployment serving the app (add Supabase env vars in dashboard for live DB)

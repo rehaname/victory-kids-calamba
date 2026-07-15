@@ -1,14 +1,14 @@
 import { getDashboardData } from "@/app/actions";
-import { KidsChurchPool } from "@/components/kids-church-pool";
+import { HistoryModule } from "@/components/history-module";
 import { StaffPinGate } from "@/components/staff-pin-gate";
 
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
+export default async function HistoryPage() {
   const data = await getDashboardData();
   return (
     <StaffPinGate>
-      <KidsChurchPool session={data.session} active={data.active} />
+      <HistoryModule sessions={data.sessions} />
     </StaffPinGate>
   );
 }
