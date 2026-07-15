@@ -11,7 +11,16 @@ import {
   searchChildrenAction,
   startSessionAction,
 } from "@/app/actions";
-import { AGE_POOL_LABELS, childFullName, formatSessionLabel, formatTime, getAgePool } from "@/lib/age";
+import {
+  AGE_POOL_LABELS,
+  childFullName,
+  formatBirthday,
+  formatSessionLabel,
+  formatTime,
+  getAge,
+  getAgePool,
+  sortByAgeThenName,
+} from "@/lib/age";
 import type {
   AgePool,
   AttendanceWithChild,
@@ -32,6 +41,8 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+const HOME_SERVICE = "Church Service";
+
 type Props = {
   session: Session | null;
   active: AttendanceWithChild[];
@@ -42,14 +53,12 @@ type ChildDraft = {
   firstName: string;
   lastName: string;
   birthday: string;
-  homeService: string;
 };
 
 const emptyChild = (): ChildDraft => ({
   firstName: "",
   lastName: "",
   birthday: "",
-  homeService: "",
 });
 
 export function KioskApp({ session, active, sessions }: Props) {
@@ -58,6 +67,7 @@ export function KioskApp({ session, active, sessions }: Props) {
   const [results, setResults] = useState<ChildWithParent[]>([]);
   const [pending, startTransition] = useTransition();
 
+  const [selectedChild, setSelectedChild] = useState<AttendanceWithChild | null>(null);
   const [checkoutTarget, setCheckoutTarget] = useState<AttendanceWithChild | null>(null);
   const [claimantName, setClaimantName] = useState("");
 
@@ -75,10 +85,13 @@ export function KioskApp({ session, active, sessions }: Props) {
       "4-6": [],
       "7-9": [],
       "10-12": [],
-      "needs-review": [],
     };
     for (const row of active) {
-      grouped[row.agePool].push(row);
+      const pool = getAgePool(row.child.birthday);
+      if (pool) grouped[pool].push(row);
+    }
+    for (const pool of Object.keys(grouped) as AgePool[]) {
+      grouped[pool] = sortByAgeThenName(grouped[pool]);
     }
     return grouped;
   }, [active]);
@@ -116,6 +129,12 @@ export function KioskApp({ session, active, sessions }: Props) {
         toast.error(err instanceof Error ? err.message : "Could not load history");
       }
     });
+  }
+
+  function beginCheckout(row: AttendanceWithChild) {
+    setSelectedChild(null);
+    setCheckoutTarget(row);
+    setClaimantName("");
   }
 
   return (
@@ -179,16 +198,25 @@ export function KioskApp({ session, active, sessions }: Props) {
 
       <main className="mx-auto max-w-6xl px-4 py-6">
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="mb-6 grid h-auto w-full grid-cols-3 gap-1 bg-white p-1 shadow-sm">
-            <TabsTrigger value="pool" className="py-3 text-base">
+          <TabsList
+            variant="line"
+            className="mb-6 h-auto w-full justify-stretch gap-0 rounded-none border-b border-black/10 bg-transparent p-0"
+          >
+            <TabsTrigger
+              value="pool"
+              className="flex-1 rounded-none py-3.5 text-base font-medium text-black/45 after:h-[3px] after:bg-[#003B8E] data-active:bg-transparent data-active:text-[#003B8E] data-active:shadow-none"
+            >
               Current Pool
             </TabsTrigger>
-            <TabsTrigger value="register" className="py-3 text-base">
+            <TabsTrigger
+              value="register"
+              className="flex-1 rounded-none py-3.5 text-base font-medium text-black/45 after:h-[3px] after:bg-[#003B8E] data-active:bg-transparent data-active:text-[#003B8E] data-active:shadow-none"
+            >
               Register
             </TabsTrigger>
             <TabsTrigger
               value="history"
-              className="py-3 text-base"
+              className="flex-1 rounded-none py-3.5 text-base font-medium text-black/45 after:h-[3px] after:bg-[#003B8E] data-active:bg-transparent data-active:text-[#003B8E] data-active:shadow-none"
               onClick={() => {
                 if (sessions[0]) loadHistory(sessions[0].id);
               }}
@@ -219,6 +247,8 @@ export function KioskApp({ session, active, sessions }: Props) {
                   ) : (
                     results.map((child) => {
                       const alreadyIn = active.some((a) => a.childId === child.id);
+                      const pool = getAgePool(child.birthday);
+                      const age = getAge(child.birthday);
                       return (
                         <div
                           key={child.id}
@@ -232,11 +262,11 @@ export function KioskApp({ session, active, sessions }: Props) {
                               Parent: {child.parent.fullName}
                             </p>
                             <p className="text-xs text-black/40">
-                              {AGE_POOL_LABELS[getAgePool(child.birthday)]}
+                              {pool ? AGE_POOL_LABELS[pool] : `Age ${age} · outside 4–12 range`}
                             </p>
                           </div>
                           <Button
-                            disabled={!session || alreadyIn || pending}
+                            disabled={!session || alreadyIn || pending || !pool}
                             className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
                             onClick={() =>
                               run(
@@ -245,7 +275,7 @@ export function KioskApp({ session, active, sessions }: Props) {
                               )
                             }
                           >
-                            {alreadyIn ? "Already in" : "Time In"}
+                            {alreadyIn ? "Already in" : pool ? "Time In" : "Not eligible"}
                           </Button>
                         </div>
                       );
@@ -266,18 +296,10 @@ export function KioskApp({ session, active, sessions }: Props) {
                     key={pool}
                     title={AGE_POOL_LABELS[pool]}
                     rows={pools[pool]}
-                    onCheckout={setCheckoutTarget}
+                    onSelect={setSelectedChild}
                   />
                 ))}
               </div>
-            )}
-
-            {pools["needs-review"].length > 0 && (
-              <PoolColumn
-                title={AGE_POOL_LABELS["needs-review"]}
-                rows={pools["needs-review"]}
-                onCheckout={setCheckoutTarget}
-              />
             )}
           </TabsContent>
 
@@ -293,7 +315,10 @@ export function KioskApp({ session, active, sessions }: Props) {
                       address,
                       contactNumber: contact,
                     },
-                    children: kids,
+                    children: kids.map((kid) => ({
+                      ...kid,
+                      homeService: HOME_SERVICE,
+                    })),
                     checkInNow,
                   });
                   setParentName("");
@@ -309,7 +334,7 @@ export function KioskApp({ session, active, sessions }: Props) {
                   Register parent & child
                 </h2>
                 <p className="text-sm text-black/55">
-                  First visit only. One parent can register multiple children.
+                  First visit only. One parent can register multiple children (ages 4–12).
                 </p>
               </div>
 
@@ -317,74 +342,86 @@ export function KioskApp({ session, active, sessions }: Props) {
                 <Field label="Parent's Name" value={parentName} onChange={setParentName} required />
                 <Field label="Contact Number" value={contact} onChange={setContact} required />
                 <div className="sm:col-span-2">
-                  <Field label="Address" value={address} onChange={setAddress} required />
+                  <Field
+                    label="Address (optional)"
+                    value={address}
+                    onChange={setAddress}
+                  />
                 </div>
               </div>
 
               <div className="space-y-4">
-                {kids.map((kid, index) => (
-                  <div key={index} className="rounded-xl border border-black/10 p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="font-medium">Child {index + 1}</p>
-                      {kids.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setKids((prev) => prev.filter((_, i) => i !== index))}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field
-                        label="First Name"
-                        value={kid.firstName}
-                        onChange={(v) =>
-                          setKids((prev) =>
-                            prev.map((k, i) => (i === index ? { ...k, firstName: v } : k)),
-                          )
-                        }
-                        required
-                      />
-                      <Field
-                        label="Last Name"
-                        value={kid.lastName}
-                        onChange={(v) =>
-                          setKids((prev) =>
-                            prev.map((k, i) => (i === index ? { ...k, lastName: v } : k)),
-                          )
-                        }
-                        required
-                      />
-                      <div className="space-y-2">
-                        <Label>Birthday</Label>
-                        <Input
-                          type="date"
-                          className="h-12"
-                          required
-                          value={kid.birthday}
-                          onChange={(e) =>
+                {kids.map((kid, index) => {
+                  const pool = kid.birthday ? getAgePool(kid.birthday) : null;
+                  const age = kid.birthday ? getAge(kid.birthday) : null;
+                  return (
+                    <div key={index} className="rounded-xl border border-black/10 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="font-medium">Child {index + 1}</p>
+                        {kids.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => setKids((prev) => prev.filter((_, i) => i !== index))}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Field
+                          label="First Name"
+                          value={kid.firstName}
+                          onChange={(v) =>
                             setKids((prev) =>
-                              prev.map((k, i) =>
-                                i === index ? { ...k, birthday: e.target.value } : k,
-                              ),
+                              prev.map((k, i) => (i === index ? { ...k, firstName: v } : k)),
                             )
                           }
+                          required
                         />
+                        <Field
+                          label="Last Name"
+                          value={kid.lastName}
+                          onChange={(v) =>
+                            setKids((prev) =>
+                              prev.map((k, i) => (i === index ? { ...k, lastName: v } : k)),
+                            )
+                          }
+                          required
+                        />
+                        <div className="space-y-2">
+                          <Label>Birthday</Label>
+                          <Input
+                            type="date"
+                            className="h-12"
+                            required
+                            value={kid.birthday}
+                            onChange={(e) =>
+                              setKids((prev) =>
+                                prev.map((k, i) =>
+                                  i === index ? { ...k, birthday: e.target.value } : k,
+                                ),
+                              )
+                            }
+                          />
+                          {kid.birthday && (
+                            <p className={`text-xs ${pool ? "text-black/45" : "text-red-600"}`}>
+                              {pool
+                                ? `${AGE_POOL_LABELS[pool]} · age ${age}`
+                                : `Age ${age} is outside the 4–12 range`}
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Home Service</Label>
+                          <div className="flex h-12 items-center rounded-md border border-black/10 bg-[#f7f9fc] px-3 text-base text-black/70">
+                            {HOME_SERVICE}
+                          </div>
+                        </div>
                       </div>
-                      <Field
-                        label="Home Service"
-                        value={kid.homeService}
-                        onChange={(v) =>
-                          setKids((prev) =>
-                            prev.map((k, i) => (i === index ? { ...k, homeService: v } : k)),
-                          )
-                        }
-                      />
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <Button type="button" variant="outline" onClick={() => setKids((p) => [...p, emptyChild()])}>
                   Add another child
                 </Button>
@@ -495,6 +532,49 @@ export function KioskApp({ session, active, sessions }: Props) {
       </main>
 
       <Dialog
+        open={Boolean(selectedChild)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedChild(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          {selectedChild && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {childFullName(selectedChild.child.firstName, selectedChild.child.lastName)}
+                </DialogTitle>
+                <DialogDescription>
+                  {AGE_POOL_LABELS[selectedChild.agePool]} · age {getAge(selectedChild.child.birthday)}
+                </DialogDescription>
+              </DialogHeader>
+              <dl className="space-y-3 text-sm">
+                <DetailRow label="Parent" value={selectedChild.child.parent.fullName} />
+                <DetailRow label="Birthday" value={formatBirthday(selectedChild.child.birthday)} />
+                <DetailRow label="Home Service" value={selectedChild.child.homeService || HOME_SERVICE} />
+                <DetailRow label="Contact" value={selectedChild.child.parent.contactNumber} />
+                {selectedChild.child.parent.address ? (
+                  <DetailRow label="Address" value={selectedChild.child.parent.address} />
+                ) : null}
+                <DetailRow label="Time In" value={formatTime(selectedChild.timeIn)} />
+              </dl>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setSelectedChild(null)}>
+                  Close
+                </Button>
+                <Button
+                  className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
+                  onClick={() => beginCheckout(selectedChild)}
+                >
+                  Out
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={Boolean(checkoutTarget)}
         onOpenChange={(open) => {
           if (!open) {
@@ -550,6 +630,15 @@ export function KioskApp({ session, active, sessions }: Props) {
   );
 }
 
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-black/5 pb-3 last:border-0 last:pb-0">
+      <dt className="text-black/50">{label}</dt>
+      <dd className="text-right font-medium">{value}</dd>
+    </div>
+  );
+}
+
 function Field({
   label,
   value,
@@ -577,11 +666,11 @@ function Field({
 function PoolColumn({
   title,
   rows,
-  onCheckout,
+  onSelect,
 }: {
   title: string;
   rows: AttendanceWithChild[];
-  onCheckout: (row: AttendanceWithChild) => void;
+  onSelect: (row: AttendanceWithChild) => void;
 }) {
   return (
     <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
@@ -597,14 +686,16 @@ function PoolColumn({
             <button
               key={row.id}
               type="button"
-              onClick={() => onCheckout(row)}
-              className="w-full rounded-xl border border-black/10 bg-[#f7f9fc] p-3 text-left transition hover:border-[#003B8E]/40 hover:bg-[#eef4ff]"
+              onClick={() => onSelect(row)}
+              className="w-full rounded-xl border border-black/10 bg-[#f7f9fc] p-3 text-left transition hover:border-[#003B8E]/40 hover:bg-[#eef4ff] active:scale-[0.99]"
             >
               <p className="text-base font-semibold">
                 {childFullName(row.child.firstName, row.child.lastName)}
               </p>
               <p className="text-sm text-black/55">Parent: {row.child.parent.fullName}</p>
-              <p className="mt-1 text-xs text-black/40">In {formatTime(row.timeIn)} · tap to Time Out</p>
+              <p className="mt-1 text-xs text-black/40">
+                Age {getAge(row.child.birthday)} · In {formatTime(row.timeIn)}
+              </p>
             </button>
           ))
         )}

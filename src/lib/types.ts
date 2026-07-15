@@ -1,5 +1,5 @@
 export type SessionStatus = "open" | "closed";
-export type AgePool = "4-6" | "7-9" | "10-12" | "needs-review";
+export type AgePool = "4-6" | "7-9" | "10-12";
 
 export type Parent = {
   id: string;

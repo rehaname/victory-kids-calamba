@@ -1,4 +1,4 @@
-import { getAgePool } from "@/lib/age";
+import { assertEligibleAge, getAgePool } from "@/lib/age";
 import type { KidsRepository } from "@/lib/data/repository";
 import type {
   Attendance,
@@ -49,10 +49,14 @@ function withChild(row: Attendance): AttendanceWithChild {
   const child = store().children.find((c) => c.id === row.childId);
   if (!child) throw new Error("Child not found");
   const enriched = withParent(child);
+  const agePool = getAgePool(enriched.birthday);
+  if (!agePool) {
+    throw new Error("Checked-in child is outside the Kids Church age range");
+  }
   return {
     ...row,
     child: enriched,
-    agePool: getAgePool(enriched.birthday),
+    agePool,
   };
 }
 
@@ -118,6 +122,10 @@ export const memoryRepository: KidsRepository = {
     if (!input.parent.fullName.trim()) throw new Error("Parent name is required");
     if (!input.children.length) throw new Error("Add at least one child");
 
+    for (const child of input.children) {
+      assertEligibleAge(child.birthday);
+    }
+
     const parent: Parent = {
       id: id(),
       fullName: input.parent.fullName.trim(),
@@ -133,7 +141,7 @@ export const memoryRepository: KidsRepository = {
       firstName: c.firstName.trim(),
       lastName: c.lastName.trim(),
       birthday: c.birthday,
-      homeService: c.homeService.trim(),
+      homeService: c.homeService.trim() || "Church Service",
       createdAt: now(),
     }));
     store().children.push(...children);
@@ -152,6 +160,10 @@ export const memoryRepository: KidsRepository = {
     if (!session || session.status !== "open") {
       throw new Error("No open session");
     }
+    const child = store().children.find((c) => c.id === childId);
+    if (!child) throw new Error("Child not found");
+    assertEligibleAge(child.birthday);
+
     const duplicate = store().attendance.find(
       (a) => a.sessionId === sessionId && a.childId === childId && !a.timeOut,
     );
