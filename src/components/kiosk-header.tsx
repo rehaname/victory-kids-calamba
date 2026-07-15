@@ -14,7 +14,7 @@ type Props = {
   onCloseSession?: () => void;
   showHistoryLink?: boolean;
   showRegisterLink?: boolean;
-  showChildrenLink?: boolean;
+  showListLink?: boolean;
   showPoolLink?: boolean;
 };
 
@@ -28,7 +28,7 @@ export function KioskHeader({
   onCloseSession,
   showHistoryLink = true,
   showRegisterLink = true,
-  showChildrenLink = true,
+  showListLink = true,
   showPoolLink = false,
 }: Props) {
   return (
@@ -64,9 +64,9 @@ export function KioskHeader({
               <Link href="/register">Register</Link>
             </Button>
           )}
-          {showChildrenLink && (
+          {showListLink && (
             <Button variant="ghost" size="xl" asChild className="text-[#003B8E]">
-              <Link href="/children">Children</Link>
+              <Link href="/list">List</Link>
             </Button>
           )}
           {showHistoryLink && (

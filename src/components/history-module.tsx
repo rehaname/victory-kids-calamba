@@ -107,6 +107,7 @@ export function HistoryModule({ sessions }: Props) {
               <tr>
                 <th className="whitespace-nowrap px-3 py-3 font-medium">Last Name</th>
                 <th className="whitespace-nowrap px-3 py-3 font-medium">First Name</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">Nickname</th>
                 <th className="px-3 py-3 font-medium">Age</th>
                 <th className="whitespace-nowrap px-3 py-3 font-medium">Birthday</th>
                 <th className="whitespace-nowrap px-3 py-3 font-medium">Home Service</th>
@@ -121,7 +122,7 @@ export function HistoryModule({ sessions }: Props) {
             <tbody>
               {historyRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-black/45">
+                  <td colSpan={12} className="px-4 py-8 text-center text-black/45">
                     {pending ? "Loading…" : "Select a session to view attendance."}
                   </td>
                 </tr>
@@ -130,6 +131,7 @@ export function HistoryModule({ sessions }: Props) {
                   <tr key={row.id} className="border-t border-black/5">
                     <td className="px-3 py-2.5 font-medium">{row.child.lastName}</td>
                     <td className="px-3 py-2.5">{row.child.firstName}</td>
+                    <td className="px-3 py-2.5">{row.child.nickname || "—"}</td>
                     <td className="px-3 py-2.5">{getAge(row.child.birthday)}</td>
                     <td className="whitespace-nowrap px-3 py-2.5">
                       {formatBirthdayMdY(row.child.birthday)}

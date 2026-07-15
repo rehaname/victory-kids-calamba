@@ -5,6 +5,7 @@ import type { AttendanceWithChild, ChildWithParent } from "@/lib/types";
 export const ROSTER_HEADERS = [
   "Last Name",
   "First Name",
+  "Nickname",
   "Age",
   "Birthday",
   "Home Service",
@@ -32,6 +33,7 @@ export function rosterCells(child: ChildWithParent): string[] {
   return [
     child.lastName,
     child.firstName,
+    child.nickname || "",
     String(getAge(child.birthday)),
     formatBirthdayMdY(child.birthday),
     child.homeService || "",

@@ -15,6 +15,7 @@ const sampleChild: ChildWithParent = {
   parentId: "p1",
   firstName: "Golden",
   lastName: "Estrellado",
+  nickname: "Gold",
   birthday: "2021-01-01",
   homeService: "9am",
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -36,6 +37,7 @@ test("roster CSV columns match registration sheet", () => {
   assert.deepEqual([...ROSTER_HEADERS], [
     "Last Name",
     "First Name",
+    "Nickname",
     "Age",
     "Birthday",
     "Home Service",
@@ -47,13 +49,14 @@ test("roster CSV columns match registration sheet", () => {
   const cells = rosterCells(sampleChild);
   assert.equal(cells[0], "Estrellado");
   assert.equal(cells[1], "Golden");
-  assert.equal(cells[3], "01/01/2021");
-  assert.equal(cells[5], "Estrellado, Denden");
-  assert.equal(cells[7], "0994-171-8789");
+  assert.equal(cells[2], "Gold");
+  assert.equal(cells[4], "01/01/2021");
+  assert.equal(cells[6], "Estrellado, Denden");
+  assert.equal(cells[8], "0994-171-8789");
 
   const csv = toCsv(ROSTER_HEADERS, [cells]);
-  assert.match(csv, /^Last Name,First Name,Age,/);
-  assert.match(csv, /Estrellado,Golden,/);
+  assert.match(csv, /^Last Name,First Name,Nickname,Age,/);
+  assert.match(csv, /Estrellado,Golden,Gold,/);
 });
 
 test("session export includes roster fields plus attendance", () => {

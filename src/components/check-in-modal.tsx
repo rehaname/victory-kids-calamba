@@ -133,6 +133,12 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
                         <div>
                           <p className="text-lg font-semibold">
                             {childFullName(child.firstName, child.lastName)}
+                            {child.nickname ? (
+                              <span className="font-normal text-black/45">
+                                {" "}
+                                ({child.nickname})
+                              </span>
+                            ) : null}
                           </p>
                           <p className="text-base text-black/55">
                             Parent: {child.parent.fullName}
