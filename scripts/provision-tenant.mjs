@@ -17,13 +17,21 @@ import { dirname, join } from "node:path";
 const PROJECT_REF = "rhmvnrvukvcyllxotvya";
 const TENANT = "victory_calamba";
 const API = "https://api.supabase.com/v1";
-const token = process.env.NOMAD_SUPABASE_ACCESS_TOKEN;
+const token =
+  process.env.iosifin_supabase_access_token ||
+  process.env.IOSIFIN_SUPABASE_ACCESS_TOKEN ||
+  process.env.NOMAD_SUPABASE_ACCESS_TOKEN ||
+  process.env.SUPABASE_ACCESS_TOKEN;
 
 if (!token) {
   console.error(
-    "Missing NOMAD_SUPABASE_ACCESS_TOKEN. Add it to this environment and re-run:",
+    "Missing Supabase access token. Expected one of:",
   );
-  console.error("  NOMAD_SUPABASE_ACCESS_TOKEN=... node scripts/provision-tenant.mjs");
+  console.error(
+    "  iosifin_supabase_access_token | NOMAD_SUPABASE_ACCESS_TOKEN | SUPABASE_ACCESS_TOKEN",
+  );
+  console.error("Add it to Cloud Agent secrets and relaunch this agent, then re-run:");
+  console.error("  npm run provision:tenant");
   process.exit(1);
 }
 
