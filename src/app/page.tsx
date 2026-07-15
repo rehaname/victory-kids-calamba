@@ -13,6 +13,7 @@ export default async function HomePage() {
         active={data.active}
         configError={data.configError}
         dataSource={data.dataSource}
+        missingEnv={data.missingEnv}
       />
     </StaffPinGate>
   );

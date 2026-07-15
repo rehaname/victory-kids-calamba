@@ -3,6 +3,17 @@ import type { KidsRepository } from "@/lib/data/repository";
 
 export type DataSourceMode = "supabase" | "memory";
 
+export type DataSourceDiagnostics = {
+  mode: DataSourceMode | "error";
+  onVercel: boolean;
+  hasUrl: boolean;
+  hasAnonKey: boolean;
+  hasServiceRoleKey: boolean;
+  kidsDataSource: string | null;
+  missing: string[];
+  message: string | null;
+};
+
 /**
  * Supabase is used whenever project keys are present, unless explicitly forced
  * to memory for local UI demos (`KIDS_DATA_SOURCE=memory`).
@@ -10,6 +21,49 @@ export type DataSourceMode = "supabase" | "memory";
  * On Vercel, memory mode is unsafe (serverless instances do not share RAM),
  * so we refuse it when keys are missing.
  */
+export function diagnoseDataSource(): DataSourceDiagnostics {
+  const onVercel = Boolean(process.env.VERCEL);
+  const hasUrl = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const hasAnonKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const kidsDataSource = process.env.KIDS_DATA_SOURCE?.trim() || null;
+  const forced = kidsDataSource?.toLowerCase() ?? null;
+
+  const missing: string[] = [];
+  if (!hasUrl) missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  if (!hasAnonKey) missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  if (!hasServiceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+
+  try {
+    const mode = resolveDataSource();
+    return {
+      mode,
+      onVercel,
+      hasUrl,
+      hasAnonKey,
+      hasServiceRoleKey,
+      kidsDataSource,
+      missing,
+      message:
+        mode === "memory"
+          ? "Running in demo memory mode. Sessions will not survive refresh."
+          : null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Database not configured";
+    return {
+      mode: "error",
+      onVercel,
+      hasUrl,
+      hasAnonKey,
+      hasServiceRoleKey,
+      kidsDataSource,
+      missing,
+      message,
+    };
+  }
+}
+
 export function resolveDataSource(): DataSourceMode {
   const hasKeys =
     Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&

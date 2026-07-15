@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getRepository, resolveDataSource } from "@/lib/data";
+import { diagnoseDataSource, getRepository, resolveDataSource } from "@/lib/data";
 import { errorMessage } from "@/lib/errors";
 import {
   DEFAULT_STAFF_PIN,
@@ -28,9 +28,12 @@ export type DashboardData = {
   sessions: Session[];
   dataSource: "supabase" | "memory" | "error";
   configError: string | null;
+  missingEnv: string[];
 };
 
 export async function getDashboardData(): Promise<DashboardData> {
+  const diagnostics = diagnoseDataSource();
+
   try {
     const dataSource = resolveDataSource();
     const repo = getRepository();
@@ -42,7 +45,8 @@ export async function getDashboardData(): Promise<DashboardData> {
       active,
       sessions,
       dataSource,
-      configError: null,
+      configError: diagnostics.message,
+      missingEnv: diagnostics.missing,
     };
   } catch (err) {
     const message = errorMessage(err);
@@ -52,7 +56,8 @@ export async function getDashboardData(): Promise<DashboardData> {
       active: [],
       sessions: [],
       dataSource: "error",
-      configError: message,
+      configError: diagnostics.message || message,
+      missingEnv: diagnostics.missing,
     };
   }
 }
