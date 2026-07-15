@@ -13,6 +13,8 @@ type Props = {
   onStartSession?: () => void;
   onCloseSession?: () => void;
   showHistoryLink?: boolean;
+  showRegisterLink?: boolean;
+  showPoolLink?: boolean;
 };
 
 export function KioskHeader({
@@ -24,6 +26,8 @@ export function KioskHeader({
   onStartSession,
   onCloseSession,
   showHistoryLink = true,
+  showRegisterLink = true,
+  showPoolLink = false,
 }: Props) {
   return (
     <header className="border-b border-black/10 bg-white/80 backdrop-blur">
@@ -48,6 +52,16 @@ export function KioskHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {showPoolLink && (
+            <Button variant="ghost" asChild className="text-[#003B8E]">
+              <Link href="/">Kids Church</Link>
+            </Button>
+          )}
+          {showRegisterLink && (
+            <Button variant="ghost" asChild className="text-[#003B8E]">
+              <Link href="/register">Register</Link>
+            </Button>
+          )}
           {showHistoryLink && (
             <Button variant="ghost" asChild className="text-[#003B8E]">
               <Link href="/history">History</Link>

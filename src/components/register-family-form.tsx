@@ -32,6 +32,8 @@ type Props = {
   checkInNow: boolean;
   pending?: boolean;
   submitLabel?: string;
+  description?: string;
+  showCheckInOption?: boolean;
   onParentNameChange: (v: string) => void;
   onAddressChange: (v: string) => void;
   onContactChange: (v: string) => void;
@@ -49,6 +51,8 @@ export function RegisterFamilyForm({
   checkInNow,
   pending = false,
   submitLabel = "Save registration",
+  description = "First visit only. Ages 4–12. Choose their home service time.",
+  showCheckInOption = true,
   onParentNameChange,
   onAddressChange,
   onContactChange,
@@ -69,9 +73,7 @@ export function RegisterFamilyForm({
         <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold">
           Register parent &amp; child
         </h2>
-        <p className="text-sm text-black/55">
-          First visit only. Ages 4–12. Choose their home service time.
-        </p>
+        <p className="text-sm text-black/55">{description}</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -173,15 +175,17 @@ export function RegisterFamilyForm({
         </Button>
       </div>
 
-      <label className="flex items-center gap-3 text-sm">
-        <input
-          type="checkbox"
-          checked={checkInNow}
-          onChange={(e) => onCheckInNowChange(e.target.checked)}
-          className="size-4"
-        />
-        Time in now after saving
-      </label>
+      {showCheckInOption && (
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={checkInNow}
+            onChange={(e) => onCheckInNowChange(e.target.checked)}
+            className="size-4"
+          />
+          Time in now after saving
+        </label>
+      )}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
         {onCancel && (
