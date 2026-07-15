@@ -22,6 +22,10 @@ function refreshHistory() {
   revalidatePath("/history");
 }
 
+function refreshChildren() {
+  revalidatePath("/children");
+}
+
 export type DashboardData = {
   session: Session | null;
   active: AttendanceWithChild[];
@@ -149,6 +153,15 @@ export async function searchChildrenAction(query: string) {
   return getRepository().searchChildren(query);
 }
 
+export async function listChildrenAction() {
+  try {
+    return await getRepository().listChildren();
+  } catch (err) {
+    console.error("listChildrenAction failed:", errorMessage(err));
+    return [];
+  }
+}
+
 export async function registerFamilyAction(input: RegisterInput) {
   try {
     resolveDataSource();
@@ -184,6 +197,7 @@ export async function registerFamilyAction(input: RegisterInput) {
       refreshPool();
     }
     refreshHistory();
+    refreshChildren();
     return { ok: true as const };
   } catch (err) {
     console.error("registerFamilyAction failed:", errorMessage(err));

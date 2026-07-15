@@ -15,6 +15,8 @@ export interface KidsRepository {
   closeSession(sessionId: string): Promise<Session>;
 
   searchChildren(query: string): Promise<ChildWithParent[]>;
+  /** Full registered roster, sorted by last name then first name. */
+  listChildren(): Promise<ChildWithParent[]>;
   registerFamily(input: RegisterInput): Promise<{ parent: Parent; children: Child[] }>;
 
   listActiveAttendance(sessionId: string): Promise<AttendanceWithChild[]>;

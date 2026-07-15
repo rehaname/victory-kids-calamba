@@ -42,6 +42,13 @@ export function formatBirthday(birthday: string) {
   }).format(parseISO(birthday));
 }
 
+/** Spreadsheet-style birthday: MM/DD/YYYY */
+export function formatBirthdayMdY(birthday: string) {
+  const [yyyy, mm, dd] = birthday.split("-");
+  if (!yyyy || !mm || !dd) return birthday;
+  return `${mm}/${dd}/${yyyy}`;
+}
+
 export function formatSessionLabel(startedAt: string, timeZone = "Asia/Manila") {
   return new Intl.DateTimeFormat("en-PH", {
     timeZone,
