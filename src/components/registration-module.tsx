@@ -59,7 +59,7 @@ export function RegistrationModule() {
             onSubmit={() => {
               startTransition(async () => {
                 try {
-                  await registerFamilyAction({
+                  const result = await registerFamilyAction({
                     parent: {
                       fullName: parentName,
                       address,
@@ -71,6 +71,10 @@ export function RegistrationModule() {
                     })),
                     checkInNow: false,
                   });
+                  if (!result.ok) {
+                    toast.error(result.error);
+                    return;
+                  }
                   resetForm();
                   toast.success("Family saved — they can check in by name later");
                 } catch (err) {

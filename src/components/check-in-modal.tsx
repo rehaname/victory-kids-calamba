@@ -189,7 +189,7 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
             onCancel={() => setMode("search")}
             onSubmit={() =>
               run(async () => {
-                await registerFamilyAction({
+                const result = await registerFamilyAction({
                   parent: {
                     fullName: parentName,
                     address,
@@ -201,6 +201,9 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
                   })),
                   checkInNow,
                 });
+                if (!result.ok) {
+                  throw new Error(result.error);
+                }
                 handleOpenChange(false);
                 onRegistered?.();
               }, "Family registered")
