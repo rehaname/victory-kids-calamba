@@ -1,8 +1,9 @@
 # Victory Kids Calamba — Agent Handoff
 
 Last updated: 2026-07-15  
-Branch: `cursor/supabase-tenant-provision-bd91` (from `cursor/victory-kids-kiosk-4c53`)  
-Prior PR: https://github.com/rehaname/victory-kids-calamba/pull/1  
+Branch: `main`  
+Merged PRs: #3 (kiosk UI), #4 (Vercel deploy fix)  
+Prior PRs: https://github.com/rehaname/victory-kids-calamba/pull/2, https://github.com/rehaname/victory-kids-calamba/pull/1  
 Repo: https://github.com/rehaname/victory-kids-calamba  
 Base branch: `main`
 
@@ -64,6 +65,12 @@ Search/results must show child full name + parent full name as sub-label.
   - `public.profiles.tenant = 'victory_calamba'`, `role = 'admin'`, `status = 'active'`
   - Password generated locally (not committed). Reset via Supabase Auth Admin API / dashboard if needed.
 
+### Merged this run (PR #3 + #4)
+
+- Kiosk UI: Church Service default, optional address, underline tabs, age 4–12 enforcement, pool sort by age, child detail + Out flow
+- Vercel: `vercel.json` forces Next.js framework preset (fixes platform 404 on all URLs)
+- Production live: https://victory-kids-calamba.vercel.app
+
 ## Remaining next steps
 
 ### 1) Staff login UI (optional but recommended before public Vercel URL)
@@ -74,7 +81,7 @@ Prefer adding a minimal email/password gate using the staff user above, then swi
 
 Do **not** consume iosifin admin seats — seats are counted per `profiles.tenant` (max 2 admins per tenant via `claim_admin_seat`).
 
-### 2) Deploy to Vercel
+### 2) Vercel env vars (if not already set in dashboard)
 
 - Separate Vercel project/instance from iosifin
 - Env vars (do not commit secrets):
@@ -154,4 +161,4 @@ npm run provision:tenant   # idempotent; needs Management API token in env
 - [x] Live DB E2E: session / register / check-in / check-out / close / history
 - [x] iosifin data untouched
 - [ ] Staff login UI (profile row already created)
-- [ ] Vercel deployment for this instance configured
+- [x] Vercel deployment serving the app (add Supabase env vars in dashboard for live DB)
