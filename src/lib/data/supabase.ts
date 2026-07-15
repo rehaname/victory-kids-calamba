@@ -1,4 +1,4 @@
-import { getAgePool } from "@/lib/age";
+import { assertEligibleAge, getAgePool } from "@/lib/age";
 import type { KidsRepository } from "@/lib/data/repository";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
@@ -83,10 +83,12 @@ function mapSession(row: SessionRow): Session {
   };
 }
 
-function mapAttendance(row: AttendanceRow): AttendanceWithChild {
+function mapAttendance(row: AttendanceRow): AttendanceWithChild | null {
   const childRow = Array.isArray(row.children) ? row.children[0] : row.children;
   if (!childRow) throw new Error("Child missing for attendance");
   const child = mapChild(childRow);
+  const agePool = getAgePool(child.birthday);
+  if (!agePool) return null;
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -96,7 +98,7 @@ function mapAttendance(row: AttendanceRow): AttendanceWithChild {
     claimantName: row.claimant_name,
     rfidTagId: row.rfid_tag_id,
     child,
-    agePool: getAgePool(child.birthday),
+    agePool,
   };
 }
 
@@ -182,6 +184,10 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async registerFamily(input: RegisterInput) {
+    for (const child of input.children) {
+      assertEligibleAge(child.birthday);
+    }
+
     const supabase = db();
     const { data: parentRow, error: parentError } = await supabase
       .from("parents")
@@ -203,7 +209,7 @@ export const supabaseRepository: KidsRepository = {
           first_name: c.firstName.trim(),
           last_name: c.lastName.trim(),
           birthday: c.birthday,
-          home_service: c.homeService.trim(),
+          home_service: c.homeService.trim() || "Church Service",
         })),
       )
       .select("*");
@@ -227,11 +233,21 @@ export const supabaseRepository: KidsRepository = {
       .is("time_out", null)
       .order("time_in");
     if (error) throw error;
-    return ((data ?? []) as AttendanceRow[]).map(mapAttendance);
+    return ((data ?? []) as AttendanceRow[])
+      .map(mapAttendance)
+      .filter((row): row is AttendanceWithChild => row !== null);
   },
 
   async checkIn(sessionId, childId) {
     const supabase = db();
+    const { data: childRow, error: childError } = await supabase
+      .from("children")
+      .select("birthday")
+      .eq("id", childId)
+      .single();
+    if (childError) throw childError;
+    assertEligibleAge((childRow as { birthday: string }).birthday);
+
     const { data, error } = await supabase
       .from("attendance")
       .insert({ session_id: sessionId, child_id: childId })
@@ -285,6 +301,8 @@ export const supabaseRepository: KidsRepository = {
       .eq("session_id", sessionId)
       .order("time_in");
     if (error) throw error;
-    return ((data ?? []) as AttendanceRow[]).map(mapAttendance);
+    return ((data ?? []) as AttendanceRow[])
+      .map(mapAttendance)
+      .filter((row): row is AttendanceWithChild => row !== null);
   },
 };
