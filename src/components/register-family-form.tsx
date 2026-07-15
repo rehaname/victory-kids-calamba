@@ -5,18 +5,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AGE_POOL_LABELS, getAge, getAgePool } from "@/lib/age";
 
-export const HOME_SERVICE = "Church Service";
+/** Victory Calamba Kids Church service times */
+export const HOME_SERVICE_OPTIONS = ["9am", "11am", "2pm", "4pm"] as const;
+export type HomeServiceOption = (typeof HOME_SERVICE_OPTIONS)[number];
+export const DEFAULT_HOME_SERVICE: HomeServiceOption = "9am";
 
 export type ChildDraft = {
   firstName: string;
   lastName: string;
   birthday: string;
+  homeService: string;
 };
 
 export const emptyChild = (): ChildDraft => ({
   firstName: "",
   lastName: "",
   birthday: "",
+  homeService: DEFAULT_HOME_SERVICE,
 });
 
 type Props = {
@@ -65,7 +70,7 @@ export function RegisterFamilyForm({
           Register parent &amp; child
         </h2>
         <p className="text-sm text-black/55">
-          First visit only. Ages 4–12. Home service: {HOME_SERVICE}.
+          First visit only. Ages 4–12. Choose their home service time.
         </p>
       </div>
 
@@ -134,10 +139,26 @@ export function RegisterFamilyForm({
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label>Home Service</Label>
-                  <div className="flex h-12 items-center rounded-md border border-black/10 bg-[#f7f9fc] px-3 text-base text-black/70">
-                    {HOME_SERVICE}
-                  </div>
+                  <Label htmlFor={`home-service-${index}`}>Home Service</Label>
+                  <select
+                    id={`home-service-${index}`}
+                    required
+                    className="h-12 w-full rounded-md border border-black/15 bg-white px-3 text-base"
+                    value={kid.homeService}
+                    onChange={(e) =>
+                      onKidsChange(
+                        kids.map((k, i) =>
+                          i === index ? { ...k, homeService: e.target.value } : k,
+                        ),
+                      )
+                    }
+                  >
+                    {HOME_SERVICE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
