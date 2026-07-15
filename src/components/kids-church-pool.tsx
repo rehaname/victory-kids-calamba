@@ -112,7 +112,8 @@ export function KidsChurchPool({ session, active }: Props) {
                   </p>
                 </div>
                 <Button
-                  className="h-12 bg-[#003B8E] px-6 text-base text-white hover:bg-[#002c6b]"
+                  size="xl"
+                  className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b] sm:w-auto"
                   onClick={() => setCheckInOpen(true)}
                 >
                   Check in a child
@@ -172,15 +173,21 @@ export function KidsChurchPool({ session, active }: Props) {
                 ) : null}
                 <DetailRow label="Time In" value={formatTime(selectedChild.timeIn)} />
               </dl>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="outline" onClick={() => setSelectedChild(null)}>
-                  Close
-                </Button>
+              <DialogFooter className="flex-col gap-3 sm:flex-col">
                 <Button
-                  className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
+                  size="xl"
+                  className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b]"
                   onClick={() => beginCheckout(selectedChild)}
                 >
-                  Out
+                  Checkout
+                </Button>
+                <Button
+                  size="xl"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setSelectedChild(null)}
+                >
+                  Close
                 </Button>
               </DialogFooter>
             </>
@@ -199,7 +206,7 @@ export function KidsChurchPool({ session, active }: Props) {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Time out</DialogTitle>
+            <DialogTitle>Checkout</DialogTitle>
             <DialogDescription>
               {checkoutTarget
                 ? `Claiming ${childFullName(checkoutTarget.child.firstName, checkoutTarget.child.lastName)}. Type the full name of the person picking up.`
@@ -210,7 +217,7 @@ export function KidsChurchPool({ session, active }: Props) {
             <Label htmlFor="claimant">Claimant full name</Label>
             <Input
               id="claimant"
-              className="h-12 text-base"
+              className="h-14 text-lg"
               value={claimantName}
               onChange={(e) => setClaimantName(e.target.value)}
               placeholder="e.g. Juan Dela Cruz"
@@ -224,7 +231,8 @@ export function KidsChurchPool({ session, active }: Props) {
           </div>
           <DialogFooter>
             <Button
-              className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
+              size="xl"
+              className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b]"
               disabled={pending || !claimantName.trim()}
               onClick={() => {
                 if (!checkoutTarget) return;
@@ -235,7 +243,7 @@ export function KidsChurchPool({ session, active }: Props) {
                 }, "Checked out");
               }}
             >
-              Confirm Time Out
+              Confirm Checkout
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -277,13 +285,13 @@ function PoolColumn({
               key={row.id}
               type="button"
               onClick={() => onSelect(row)}
-              className="w-full rounded-xl border border-black/10 bg-[#f7f9fc] p-3 text-left transition hover:border-[#003B8E]/40 hover:bg-[#eef4ff] active:scale-[0.99]"
+              className="w-full rounded-xl border border-black/10 bg-[#f7f9fc] p-4 text-left transition hover:border-[#003B8E]/40 hover:bg-[#eef4ff] active:scale-[0.99]"
             >
-              <p className="text-base font-semibold">
+              <p className="text-lg font-semibold">
                 {childFullName(row.child.firstName, row.child.lastName)}
               </p>
-              <p className="text-sm text-black/55">Parent: {row.child.parent.fullName}</p>
-              <p className="mt-1 text-xs text-black/40">
+              <p className="text-base text-black/55">Parent: {row.child.parent.fullName}</p>
+              <p className="mt-1 text-sm text-black/40">
                 Age {getAge(row.child.birthday)} · In {formatTime(row.timeIn)}
               </p>
             </button>

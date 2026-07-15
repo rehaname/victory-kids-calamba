@@ -126,7 +126,7 @@ export function StaffPinGate({ children }: Props) {
               type="button"
               variant="outline"
               disabled={pending}
-              className="h-14 text-xl font-semibold"
+              className="h-16 text-2xl font-semibold"
               onClick={() => press(d)}
             >
               {d}
@@ -136,7 +136,7 @@ export function StaffPinGate({ children }: Props) {
             type="button"
             variant="ghost"
             disabled={pending}
-            className="h-14 text-sm text-black/55"
+            className="h-16 text-base text-black/55"
             onClick={clear}
           >
             Clear
@@ -145,7 +145,7 @@ export function StaffPinGate({ children }: Props) {
             type="button"
             variant="outline"
             disabled={pending}
-            className="h-14 text-xl font-semibold"
+            className="h-16 text-2xl font-semibold"
             onClick={() => press("0")}
           >
             0
@@ -153,7 +153,7 @@ export function StaffPinGate({ children }: Props) {
           <Button
             type="button"
             disabled={pending || pin.length !== 6}
-            className="h-14 bg-[#003B8E] text-sm text-white hover:bg-[#002c6b]"
+            className="h-16 bg-[#003B8E] text-base text-white hover:bg-[#002c6b]"
             onClick={() => submit()}
           >
             Unlock

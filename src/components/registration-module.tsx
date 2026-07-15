@@ -36,7 +36,7 @@ export function RegistrationModule() {
       />
 
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-6">
-        <Button variant="outline" asChild>
+        <Button variant="outline" size="xl" asChild>
           <Link href="/">← Back to Kids Church pool</Link>
         </Button>
 

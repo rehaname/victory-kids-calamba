@@ -47,14 +47,14 @@ export function HistoryModule({ sessions }: Props) {
       />
 
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-6">
-        <Button variant="outline" asChild>
+        <Button variant="outline" size="xl" asChild>
           <Link href="/">← Back to Kids Church pool</Link>
         </Button>
 
         <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
           <Label className="mb-2 block">Session</Label>
           <select
-            className="h-12 w-full rounded-md border border-black/15 bg-white px-3 text-base"
+            className="h-14 w-full rounded-md border border-black/15 bg-white px-3 text-base"
             value={historySessionId}
             disabled={pending}
             onChange={(e) => loadHistory(e.target.value)}
@@ -104,9 +104,7 @@ export function HistoryModule({ sessions }: Props) {
         </div>
 
         {historyRows.length > 0 && (
-          <Button
-            variant="outline"
-            onClick={() => {
+          <Button size="xl" variant="outline" onClick={() => {
               const csv = [
                 ["Child", "Parent", "Time In", "Time Out", "Claimed By"].join(","),
                 ...historyRows.map((row) =>
