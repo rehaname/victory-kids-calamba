@@ -28,6 +28,7 @@ export function ChildrenRoster({ roster }: Props) {
       const hay = [
         child.lastName,
         child.firstName,
+        child.nickname,
         child.parent.fullName,
         child.parent.address,
         child.parent.contactNumber,
@@ -50,10 +51,10 @@ export function ChildrenRoster({ roster }: Props) {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#e8f0ff_0%,_#ffffff_45%,_#f4f6f8_100%)] text-black">
       <KioskHeader
-        title="Children"
+        title="List"
         subtitle="Registered kids roster"
         showSessionControls={false}
-        showChildrenLink={false}
+        showListLink={false}
         showPoolLink
       />
 
@@ -82,14 +83,14 @@ export function ChildrenRoster({ roster }: Props) {
           <Input
             id="roster-search"
             className="h-14 text-base"
-            placeholder="Name, parent, address, or contact…"
+            placeholder="Name, nickname, parent, address, or contact…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
 
         <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-black/5">
-          <table className="w-full min-w-[56rem] text-left text-sm">
+          <table className="w-full min-w-[60rem] text-left text-sm">
             <thead className="bg-[#2e7d32] text-white">
               <tr>
                 {ROSTER_HEADERS.map((header) => (
@@ -116,6 +117,7 @@ export function ChildrenRoster({ roster }: Props) {
                   <tr key={child.id} className="border-t border-black/5">
                     <td className="px-3 py-2.5 font-medium">{child.lastName}</td>
                     <td className="px-3 py-2.5">{child.firstName}</td>
+                    <td className="px-3 py-2.5">{child.nickname || "—"}</td>
                     <td className="px-3 py-2.5">{getAge(child.birthday)}</td>
                     <td className="whitespace-nowrap px-3 py-2.5">
                       {formatBirthdayMdY(child.birthday)}

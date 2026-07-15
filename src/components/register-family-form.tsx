@@ -13,6 +13,7 @@ export const DEFAULT_HOME_SERVICE: HomeServiceOption = "9am";
 export type ChildDraft = {
   firstName: string;
   lastName: string;
+  nickname: string;
   birthday: string;
   homeService: string;
 };
@@ -20,6 +21,7 @@ export type ChildDraft = {
 export const emptyChild = (): ChildDraft => ({
   firstName: "",
   lastName: "",
+  nickname: "",
   birthday: "",
   homeService: DEFAULT_HOME_SERVICE,
 });
@@ -119,6 +121,13 @@ export function RegisterFamilyForm({
                   }
                   required
                 />
+                <Field
+                  label="Nickname (optional)"
+                  value={kid.nickname}
+                  onChange={(v) =>
+                    onKidsChange(kids.map((k, i) => (i === index ? { ...k, nickname: v } : k)))
+                  }
+                />
                 <div className="space-y-2">
                   <Label>Birthday</Label>
                   <Input
@@ -140,7 +149,7 @@ export function RegisterFamilyForm({
                     </p>
                   )}
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor={`home-service-${index}`}>Home Service</Label>
                   <select
                     id={`home-service-${index}`}

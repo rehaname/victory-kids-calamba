@@ -195,6 +195,9 @@ export function KidsChurchPool({
                 </DialogDescription>
               </DialogHeader>
               <dl className="space-y-3 text-sm">
+                {selectedChild.child.nickname ? (
+                  <DetailRow label="Nickname" value={selectedChild.child.nickname} />
+                ) : null}
                 <DetailRow label="Parent" value={selectedChild.child.parent.fullName} />
                 <DetailRow label="Birthday" value={formatBirthday(selectedChild.child.birthday)} />
                 <DetailRow

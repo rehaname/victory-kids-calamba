@@ -23,6 +23,7 @@ function refreshHistory() {
 }
 
 function refreshChildren() {
+  revalidatePath("/list");
   revalidatePath("/children");
 }
 

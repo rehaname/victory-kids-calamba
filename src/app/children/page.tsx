@@ -1,14 +1,5 @@
-import { listChildrenAction } from "@/app/actions";
-import { ChildrenRoster } from "@/components/children-roster";
-import { StaffPinGate } from "@/components/staff-pin-gate";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function ChildrenPage() {
-  const roster = await listChildrenAction();
-  return (
-    <StaffPinGate>
-      <ChildrenRoster roster={roster} />
-    </StaffPinGate>
-  );
+export default function ChildrenRedirectPage() {
+  redirect("/list");
 }
