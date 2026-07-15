@@ -116,6 +116,10 @@ export const memoryRepository: KidsRepository = {
       );
   },
 
+  async listChildren() {
+    return this.searchChildren("");
+  },
+
   async registerFamily(input: RegisterInput) {
     if (!input.parent.fullName.trim()) throw new Error("Parent name is required");
     if (!input.children.length) throw new Error("Add at least one child");

@@ -192,6 +192,10 @@ export const supabaseRepository: KidsRepository = {
     );
   },
 
+  async listChildren() {
+    return this.searchChildren("");
+  },
+
   async registerFamily(input: RegisterInput) {
     for (const child of input.children) {
       assertEligibleAge(child.birthday);
