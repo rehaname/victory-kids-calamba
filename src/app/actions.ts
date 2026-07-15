@@ -16,6 +16,7 @@ import type { RegisterInput } from "@/lib/types";
 function refresh() {
   revalidatePath("/");
   revalidatePath("/history");
+  revalidatePath("/register");
 }
 
 export async function getDashboardData() {

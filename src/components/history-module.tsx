@@ -43,6 +43,7 @@ export function HistoryModule({ sessions }: Props) {
         subtitle="Past Kids Church sessions"
         showSessionControls={false}
         showHistoryLink={false}
+        showPoolLink
       />
 
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-6">
