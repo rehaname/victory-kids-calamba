@@ -106,7 +106,7 @@ export const memoryRepository: KidsRepository = {
     return store()
       .children.map(withParent)
       .filter((c) => {
-        const hay = `${c.firstName} ${c.lastName} ${c.parent.fullName}`.toLowerCase();
+        const hay = `${c.firstName} ${c.lastName} ${c.nickname} ${c.parent.fullName}`.toLowerCase();
         return hay.includes(q);
       })
       .sort((a, b) =>
@@ -142,6 +142,7 @@ export const memoryRepository: KidsRepository = {
       parentId: parent.id,
       firstName: c.firstName.trim(),
       lastName: c.lastName.trim(),
+      nickname: (c.nickname ?? "").trim(),
       birthday: c.birthday,
       homeService: c.homeService.trim() || "9am",
       createdAt: now(),

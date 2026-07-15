@@ -14,6 +14,7 @@ export type Child = {
   parentId: string;
   firstName: string;
   lastName: string;
+  nickname: string;
   birthday: string; // YYYY-MM-DD
   homeService: string;
   createdAt: string;
@@ -54,6 +55,7 @@ export type RegisterInput = {
   children: Array<{
     firstName: string;
     lastName: string;
+    nickname?: string;
     birthday: string;
     homeService: string;
   }>;

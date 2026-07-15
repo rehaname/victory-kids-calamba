@@ -19,6 +19,7 @@ create table if not exists victory_calamba.children (
   parent_id uuid not null references victory_calamba.parents(id) on delete restrict,
   first_name text not null,
   last_name text not null,
+  nickname text not null default '',
   birthday date not null,
   home_service text not null default '',
   created_at timestamptz not null default now(),

@@ -29,6 +29,7 @@ type ChildRow = {
   parent_id: string;
   first_name: string;
   last_name: string;
+  nickname: string | null;
   birthday: string;
   home_service: string;
   created_at: string;
@@ -72,6 +73,7 @@ function mapChild(row: ChildRow, parent?: Parent): ChildWithParent {
     parentId: row.parent_id,
     firstName: row.first_name,
     lastName: row.last_name,
+    nickname: row.nickname?.trim() || "",
     birthday: row.birthday,
     homeService: row.home_service,
     createdAt: row.created_at,
@@ -186,7 +188,7 @@ export const supabaseRepository: KidsRepository = {
     if (!q) return rows;
     const lower = q.toLowerCase();
     return rows.filter((c) =>
-      `${c.firstName} ${c.lastName} ${c.parent.fullName}`
+      `${c.firstName} ${c.lastName} ${c.nickname} ${c.parent.fullName}`
         .toLowerCase()
         .includes(lower),
     );
@@ -221,6 +223,7 @@ export const supabaseRepository: KidsRepository = {
           parent_id: parent.id,
           first_name: c.firstName.trim(),
           last_name: c.lastName.trim(),
+          nickname: (c.nickname ?? "").trim(),
           birthday: c.birthday,
           home_service: c.homeService.trim() || "9am",
         })),
