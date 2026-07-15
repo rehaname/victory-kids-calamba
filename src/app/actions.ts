@@ -2,10 +2,20 @@
 
 import { revalidatePath } from "next/cache";
 import { getRepository } from "@/lib/data";
+import {
+  DEFAULT_STAFF_PIN,
+  extractPinFromRemarks,
+  isValidPinFormat,
+  normalizePin,
+  staffPinConfigured,
+} from "@/lib/staff-pin";
+import { createPublicAdminClient } from "@/lib/supabase/public-admin";
+import { TENANT } from "@/lib/tenant";
 import type { RegisterInput } from "@/lib/types";
 
 function refresh() {
   revalidatePath("/");
+  revalidatePath("/history");
 }
 
 export async function getDashboardData() {
@@ -14,6 +24,53 @@ export async function getDashboardData() {
   const active = session ? await repo.listActiveAttendance(session.id) : [];
   const sessions = await repo.listSessions();
   return { session, active, sessions };
+}
+
+/**
+ * Verify the 6-digit staff PIN against public.profiles.remarks
+ * for the victory_calamba admin profile. Church can update remarks anytime.
+ */
+export async function verifyStaffPinAction(pinInput: string) {
+  const pin = normalizePin(pinInput);
+  if (!isValidPinFormat(pin)) {
+    return { ok: false as const, error: "Enter the 6-digit staff PIN." };
+  }
+
+  let expected: string | null = null;
+
+  if (staffPinConfigured()) {
+    const supabase = createPublicAdminClient();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("remarks")
+      .eq("tenant", TENANT)
+      .eq("role", "admin")
+      .eq("status", "active")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      return { ok: false as const, error: "Could not verify PIN. Try again." };
+    }
+
+    expected = extractPinFromRemarks(data?.remarks as string | null);
+  } else {
+    expected = process.env.KIOSK_STAFF_PIN?.trim() || DEFAULT_STAFF_PIN;
+  }
+
+  if (!expected || !isValidPinFormat(expected)) {
+    return {
+      ok: false as const,
+      error: "Staff PIN is not configured. Ask an admin to set profiles.remarks.",
+    };
+  }
+
+  if (pin !== expected) {
+    return { ok: false as const, error: "Incorrect PIN." };
+  }
+
+  return { ok: true as const };
 }
 
 export async function startSessionAction() {
