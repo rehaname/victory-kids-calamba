@@ -1,15 +1,9 @@
 import { getDashboardData } from "@/app/actions";
-import { KioskApp } from "@/components/kiosk-app";
+import { KidsChurchPool } from "@/components/kids-church-pool";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const data = await getDashboardData();
-  return (
-    <KioskApp
-      session={data.session}
-      active={data.active}
-      sessions={data.sessions}
-    />
-  );
+  return <KidsChurchPool session={data.session} active={data.active} />;
 }
