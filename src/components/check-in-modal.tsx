@@ -21,8 +21,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DEFAULT_HOME_SERVICE,
   emptyChild,
-  HOME_SERVICE,
   RegisterFamilyForm,
 } from "@/components/register-family-form";
 
@@ -197,7 +197,7 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
                   },
                   children: kids.map((kid) => ({
                     ...kid,
-                    homeService: HOME_SERVICE,
+                    homeService: kid.homeService || DEFAULT_HOME_SERVICE,
                   })),
                   checkInNow,
                 });

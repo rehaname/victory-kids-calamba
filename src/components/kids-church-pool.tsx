@@ -19,7 +19,7 @@ import {
 import type { AgePool, AttendanceWithChild, Session } from "@/lib/types";
 import { CheckInModal } from "@/components/check-in-modal";
 import { KioskHeader } from "@/components/kiosk-header";
-import { HOME_SERVICE } from "@/components/register-family-form";
+import { DEFAULT_HOME_SERVICE } from "@/components/register-family-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -164,7 +164,7 @@ export function KidsChurchPool({ session, active }: Props) {
                 <DetailRow label="Birthday" value={formatBirthday(selectedChild.child.birthday)} />
                 <DetailRow
                   label="Home Service"
-                  value={selectedChild.child.homeService || HOME_SERVICE}
+                  value={selectedChild.child.homeService || DEFAULT_HOME_SERVICE}
                 />
                 <DetailRow label="Contact" value={selectedChild.child.parent.contactNumber} />
                 {selectedChild.child.parent.address ? (

@@ -139,7 +139,7 @@ export const memoryRepository: KidsRepository = {
       firstName: c.firstName.trim(),
       lastName: c.lastName.trim(),
       birthday: c.birthday,
-      homeService: c.homeService.trim() || "Church Service",
+      homeService: c.homeService.trim() || "9am",
       createdAt: now(),
     }));
     store().children.push(...children);

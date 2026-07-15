@@ -209,7 +209,7 @@ export const supabaseRepository: KidsRepository = {
           first_name: c.firstName.trim(),
           last_name: c.lastName.trim(),
           birthday: c.birthday,
-          home_service: c.homeService.trim() || "Church Service",
+          home_service: c.homeService.trim() || "9am",
         })),
       )
       .select("*");
