@@ -9,6 +9,7 @@ export function getRepository(): KidsRepository {
   const configured =
     Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
     Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) &&
+    Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
     process.env.KIDS_DATA_SOURCE === "supabase";
 
   if (configured) {

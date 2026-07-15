@@ -1,6 +1,6 @@
 import { getAgePool } from "@/lib/age";
 import type { KidsRepository } from "@/lib/data/repository";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Attendance,
   AttendanceWithChild,
@@ -100,13 +100,15 @@ function mapAttendance(row: AttendanceRow): AttendanceWithChild {
   };
 }
 
-async function db() {
-  return createClient();
+function db() {
+  // Staff-owned kiosk: server actions use service role scoped to TENANT_SCHEMA.
+  // Authenticated staff login (profiles.tenant) can replace this later.
+  return createAdminClient();
 }
 
 export const supabaseRepository: KidsRepository = {
   async getOpenSession() {
-    const supabase = await db();
+    const supabase = db();
     const { data, error } = await supabase
       .from("sessions")
       .select("*")
@@ -117,7 +119,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async listSessions() {
-    const supabase = await db();
+    const supabase = db();
     const { data, error } = await supabase
       .from("sessions")
       .select("*")
@@ -127,7 +129,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async startSession() {
-    const supabase = await db();
+    const supabase = db();
     const { data, error } = await supabase
       .from("sessions")
       .insert({ status: "open" })
@@ -138,7 +140,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async closeSession(sessionId) {
-    const supabase = await db();
+    const supabase = db();
     const { data, error } = await supabase
       .from("sessions")
       .update({ status: "closed", ended_at: new Date().toISOString() })
@@ -151,7 +153,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async searchChildren(query) {
-    const supabase = await db();
+    const supabase = db();
     let req = supabase
       .from("children")
       .select("*, parents(*)")
@@ -180,7 +182,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async registerFamily(input: RegisterInput) {
-    const supabase = await db();
+    const supabase = db();
     const { data: parentRow, error: parentError } = await supabase
       .from("parents")
       .insert({
@@ -217,7 +219,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async listActiveAttendance(sessionId) {
-    const supabase = await db();
+    const supabase = db();
     const { data, error } = await supabase
       .from("attendance")
       .select("*, children(*, parents(*))")
@@ -229,7 +231,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async checkIn(sessionId, childId) {
-    const supabase = await db();
+    const supabase = db();
     const { data, error } = await supabase
       .from("attendance")
       .insert({ session_id: sessionId, child_id: childId })
@@ -249,7 +251,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async checkOut(attendanceId, claimantName) {
-    const supabase = await db();
+    const supabase = db();
     const name = claimantName.trim();
     if (!name) throw new Error("Claimant name is required");
     const { data, error } = await supabase
@@ -276,7 +278,7 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async listAttendanceForSession(sessionId) {
-    const supabase = await db();
+    const supabase = db();
     const { data, error } = await supabase
       .from("attendance")
       .select("*, children(*, parents(*))")
