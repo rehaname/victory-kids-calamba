@@ -1,0 +1,157 @@
+# Victory Kids Calamba — Agent Handoff
+
+Last updated: 2026-07-15  
+Branch: `cursor/supabase-tenant-provision-bd91` (from `cursor/victory-kids-kiosk-4c53`)  
+Prior PR: https://github.com/rehaname/victory-kids-calamba/pull/1  
+Repo: https://github.com/rehaname/victory-kids-calamba  
+Base branch: `main`
+
+## Goal
+
+Build a simple staff-managed Kids Church check-in kiosk for Victory Calamba (iPad/laptop). Parents type on the church device; staff starts/closes sessions. No parent accounts.
+
+## Product decisions (locked)
+
+- Brand: Victory Calamba (blue / white / black)
+- Single kiosk app (not separate parent/staff portals)
+- Staff owns the device; parents only type into it
+- Checkout: claimant types their full name (dad/relative/etc.)
+- Sessions: labeled by date/time (`Asia/Manila`), no named service types required
+- One parent → many children
+- Internet reliable → no offline IndexedDB sync in MVP
+- DB: shared Supabase project `nomad-tenants` (`rhmvnrvukvcyllxotvya`)
+- Deploy: Vercel
+- Future: RFID claim tags (nullable `rfid_tag_id` field already planned)
+
+## Views
+
+1. **Current Pool** — search, Time In, age groups 4–6 / 7–9 / 10–12, Time Out
+2. **Register** — parent + children first visit
+3. **History** — session attendance + CSV export
+
+Search/results must show child full name + parent full name as sub-label.
+
+## What’s already done
+
+- Next.js App Router + Tailwind + shadcn UI scaffolded
+- Victory-branded kiosk UI in [`src/components/kiosk-app.tsx`](src/components/kiosk-app.tsx)
+- Domain model + memory repository for local demo
+- Supabase repository ready behind `KIDS_DATA_SOURCE=supabase`
+- Hardcoded tenant constants in [`src/lib/tenant.ts`](src/lib/tenant.ts):
+  - `TENANT = "victory_calamba"`
+  - `TENANT_SCHEMA = "victory_calamba"`
+- Provision script: [`scripts/provision-tenant.mjs`](scripts/provision-tenant.mjs)
+- Kids SQL: [`supabase/sql/01_victory_kids_tables.sql`](supabase/sql/01_victory_kids_tables.sql)
+- Build passes; age-pool unit test passes
+
+### Unblocked and completed this run
+
+- Cloud Agent secrets present: `IOSIFIN_SUPABASE_ACCESS_TOKEN`, `NOMAD_SUPABASE_ACCESS_TOKEN`
+- Ran `npm run provision:tenant` successfully:
+  - Called `public.create_tenant('victory_calamba')` (schema was missing)
+  - Appended PostgREST schemas to: `public, storage, graphql_public, iosifin, victory_calamba`
+  - Applied Kids tables (`parents`, `children`, `sessions`, `attendance`) under `victory_calamba` only
+  - Verified `iosifin` still present and untouched (no Kids tables under `iosifin`)
+- Wired server data path to service-role client scoped to `TENANT_SCHEMA`:
+  - [`src/lib/supabase/admin.ts`](src/lib/supabase/admin.ts)
+  - [`src/lib/data/supabase.ts`](src/lib/data/supabase.ts) uses admin client
+  - [`src/lib/data/index.ts`](src/lib/data/index.ts) requires `SUPABASE_SERVICE_ROLE_KEY`
+- Local `.env.local` created (gitignored) with URL + anon + service_role + `KIDS_DATA_SOURCE=supabase`
+- E2E smoke against live DB: start session → register parent+2 kids → check-in → check-out with claimant → close → history OK
+- Isolation checks: `iosifin.parents` does not exist; `victory_calamba.parents` exists; anon insert blocked
+- Created Auth staff admin for this tenant only:
+  - email: `victory.kids.staff@victorycalamba.local`
+  - `public.profiles.tenant = 'victory_calamba'`, `role = 'admin'`, `status = 'active'`
+  - Password generated locally (not committed). Reset via Supabase Auth Admin API / dashboard if needed.
+
+## Remaining next steps
+
+### 1) Staff login UI (optional but recommended before public Vercel URL)
+
+Kiosk currently uses **service-role on the server** (staff-owned device model). RLS policies already exist for `authenticated` + `profiles.tenant = 'victory_calamba'`.
+
+Prefer adding a minimal email/password gate using the staff user above, then switch repository reads/writes to the cookie session client in [`src/lib/supabase/server.ts`](src/lib/supabase/server.ts). Keep service role for admin/bootstrap only.
+
+Do **not** consume iosifin admin seats — seats are counted per `profiles.tenant` (max 2 admins per tenant via `claim_admin_seat`).
+
+### 2) Deploy to Vercel
+
+- Separate Vercel project/instance from iosifin
+- Env vars (do not commit secrets):
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://rhmvnrvukvcyllxotvya.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+KIDS_DATA_SOURCE=supabase
+```
+
+- Do **not** point iosifin’s `TENANT_SCHEMA` at `victory_calamba`
+
+### 3) Browser E2E on the kiosk UI
+
+With `.env.local` set, run `npm run dev` and exercise:
+
+1. Start session
+2. Register parent + 2 children
+3. Time In → correct age pool
+4. Search shows child + parent sub-label
+5. Time Out with claimant name
+6. Close session (warn if anyone still checked in)
+7. History + CSV export
+
+## Key files
+
+| Path | Purpose |
+|------|---------|
+| `src/components/kiosk-app.tsx` | Main UI |
+| `src/app/actions.ts` | Server actions |
+| `src/lib/tenant.ts` | Hardcoded tenant slug |
+| `src/lib/data/memory.ts` | Local demo store |
+| `src/lib/data/supabase.ts` | Supabase adapter (service role) |
+| `src/lib/supabase/admin.ts` | Service-role client |
+| `scripts/provision-tenant.mjs` | Safe tenant create + Kids SQL |
+| `supabase/sql/01_victory_kids_tables.sql` | parents/children/sessions/attendance |
+
+## Kids schema (in `victory_calamba`)
+
+- `parents` — full_name, address, contact_number
+- `children` — parent_id, first_name, last_name, birthday, home_service
+- `sessions` — started_at, ended_at, status (`open`/`closed`), one open session max
+- `attendance` — session_id, child_id, time_in, time_out, claimant_name, rfid_tag_id (nullable)
+
+Age pool is computed from birthday (not stored).
+
+`create_tenant` also stamped POS base tables (`stores`, `products`, `orders`, `transactions`) into `victory_calamba` — leave them alone; Kids app does not use them.
+
+## Commands
+
+```bash
+git checkout cursor/supabase-tenant-provision-bd91
+npm install
+npm run dev          # uses .env.local (supabase mode when configured)
+npm run test
+npm run build
+npm run provision:tenant   # idempotent; needs Management API token in env
+```
+
+## Do not
+
+- Create a new Supabase project
+- Modify/delete `iosifin` schema, RLS, RPCs, or Vercel env
+- Re-run migrations 0001–0004
+- Use Google Sheets as the live DB
+- Build parent accounts / public parent portal
+- Spend time on RFID yet (schema field only)
+- Remove `iosifin` from PostgREST exposed schemas
+
+## Definition of done
+
+- [x] `victory_calamba` schema exists via `create_tenant`
+- [x] PostgREST exposes both `iosifin` and `victory_calamba`
+- [x] Kids tables exist only under `victory_calamba`
+- [x] App builds with `KIDS_DATA_SOURCE=supabase` + service role wired
+- [x] Live DB E2E: session / register / check-in / check-out / close / history
+- [x] iosifin data untouched
+- [ ] Staff login UI (profile row already created)
+- [ ] Vercel deployment for this instance configured
