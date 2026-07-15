@@ -83,14 +83,12 @@ function mapSession(row: SessionRow): Session {
   };
 }
 
-function mapAttendance(row: AttendanceRow): AttendanceWithChild {
+function mapAttendance(row: AttendanceRow): AttendanceWithChild | null {
   const childRow = Array.isArray(row.children) ? row.children[0] : row.children;
   if (!childRow) throw new Error("Child missing for attendance");
   const child = mapChild(childRow);
   const agePool = getAgePool(child.birthday);
-  if (!agePool) {
-    throw new Error("Checked-in child is outside the Kids Church age range");
-  }
+  if (!agePool) return null;
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -235,7 +233,9 @@ export const supabaseRepository: KidsRepository = {
       .is("time_out", null)
       .order("time_in");
     if (error) throw error;
-    return ((data ?? []) as AttendanceRow[]).map(mapAttendance);
+    return ((data ?? []) as AttendanceRow[])
+      .map(mapAttendance)
+      .filter((row): row is AttendanceWithChild => row !== null);
   },
 
   async checkIn(sessionId, childId) {
@@ -301,6 +301,8 @@ export const supabaseRepository: KidsRepository = {
       .eq("session_id", sessionId)
       .order("time_in");
     if (error) throw error;
-    return ((data ?? []) as AttendanceRow[]).map(mapAttendance);
+    return ((data ?? []) as AttendanceRow[])
+      .map(mapAttendance)
+      .filter((row): row is AttendanceWithChild => row !== null);
   },
 };

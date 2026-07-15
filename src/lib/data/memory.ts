@@ -45,14 +45,12 @@ function withParent(child: Child): ChildWithParent {
   return { ...child, parent };
 }
 
-function withChild(row: Attendance): AttendanceWithChild {
+function withChild(row: Attendance): AttendanceWithChild | null {
   const child = store().children.find((c) => c.id === row.childId);
   if (!child) throw new Error("Child not found");
   const enriched = withParent(child);
   const agePool = getAgePool(enriched.birthday);
-  if (!agePool) {
-    throw new Error("Checked-in child is outside the Kids Church age range");
-  }
+  if (!agePool) return null;
   return {
     ...row,
     child: enriched,
@@ -152,6 +150,7 @@ export const memoryRepository: KidsRepository = {
     return store()
       .attendance.filter((a) => a.sessionId === sessionId && !a.timeOut)
       .map(withChild)
+      .filter((row): row is AttendanceWithChild => row !== null)
       .sort((a, b) => a.timeIn.localeCompare(b.timeIn));
   },
 
@@ -197,6 +196,7 @@ export const memoryRepository: KidsRepository = {
     return store()
       .attendance.filter((a) => a.sessionId === sessionId)
       .map(withChild)
+      .filter((row): row is AttendanceWithChild => row !== null)
       .sort((a, b) => a.timeIn.localeCompare(b.timeIn));
   },
 };
