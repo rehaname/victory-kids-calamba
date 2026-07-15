@@ -36,9 +36,16 @@ import {
 type Props = {
   session: Session | null;
   active: AttendanceWithChild[];
+  configError?: string | null;
+  dataSource?: "supabase" | "memory" | "error";
 };
 
-export function KidsChurchPool({ session, active }: Props) {
+export function KidsChurchPool({
+  session,
+  active,
+  configError = null,
+  dataSource = "supabase",
+}: Props) {
   const [pending, startTransition] = useTransition();
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [selectedChild, setSelectedChild] = useState<AttendanceWithChild | null>(null);
@@ -88,17 +95,37 @@ export function KidsChurchPool({ session, active }: Props) {
         pending={pending}
         onStartSession={() =>
           run(async () => {
-            await startSessionAction();
+            const result = await startSessionAction();
+            if (!result.ok) throw new Error(result.error);
             setCheckInOpen(true);
           }, "Kids Church session started")
         }
         onCloseSession={() =>
           session &&
-          run(async () => closeSessionAction(session.id), "Session closed")
+          run(async () => {
+            const result = await closeSessionAction(session.id);
+            if (!result.ok) throw new Error(result.error);
+          }, "Session closed")
         }
       />
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6">
+        {configError && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800">
+            <p className="font-semibold">Database not connected</p>
+            <p className="mt-1">{configError}</p>
+            <p className="mt-2 text-red-700/80">
+              Sessions will not survive refresh until Supabase env vars are set on Vercel.
+            </p>
+          </div>
+        )}
+        {dataSource === "memory" && !configError && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Demo mode (in-memory). Data is lost on refresh. Set{" "}
+            <code className="font-mono">KIDS_DATA_SOURCE=supabase</code> with Supabase keys to
+            persist sessions.
+          </div>
+        )}
         {session ? (
           <>
             <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">

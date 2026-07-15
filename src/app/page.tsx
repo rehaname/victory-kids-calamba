@@ -8,7 +8,12 @@ export default async function HomePage() {
   const data = await getDashboardData();
   return (
     <StaffPinGate>
-      <KidsChurchPool session={data.session} active={data.active} />
+      <KidsChurchPool
+        session={data.session}
+        active={data.active}
+        configError={data.configError}
+        dataSource={data.dataSource}
+      />
     </StaffPinGate>
   );
 }

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getRepository } from "@/lib/data";
+import { getRepository, resolveDataSource } from "@/lib/data";
 import { errorMessage } from "@/lib/errors";
 import {
   DEFAULT_STAFF_PIN,
@@ -12,7 +12,7 @@ import {
 } from "@/lib/staff-pin";
 import { createPublicAdminClient } from "@/lib/supabase/public-admin";
 import { TENANT } from "@/lib/tenant";
-import type { RegisterInput } from "@/lib/types";
+import type { AttendanceWithChild, RegisterInput, Session } from "@/lib/types";
 
 function refreshPool() {
   revalidatePath("/");
@@ -22,17 +22,38 @@ function refreshHistory() {
   revalidatePath("/history");
 }
 
-export async function getDashboardData() {
+export type DashboardData = {
+  session: Session | null;
+  active: AttendanceWithChild[];
+  sessions: Session[];
+  dataSource: "supabase" | "memory" | "error";
+  configError: string | null;
+};
+
+export async function getDashboardData(): Promise<DashboardData> {
   try {
+    const dataSource = resolveDataSource();
     const repo = getRepository();
     const session = await repo.getOpenSession();
     const active = session ? await repo.listActiveAttendance(session.id) : [];
     const sessions = await repo.listSessions();
-    return { session, active, sessions };
+    return {
+      session,
+      active,
+      sessions,
+      dataSource,
+      configError: null,
+    };
   } catch (err) {
-    // Avoid opaque Server Components digest; surface an empty dashboard + log.
-    console.error("getDashboardData failed:", errorMessage(err));
-    return { session: null, active: [], sessions: [] };
+    const message = errorMessage(err);
+    console.error("getDashboardData failed:", message);
+    return {
+      session: null,
+      active: [],
+      sessions: [],
+      dataSource: "error",
+      configError: message,
+    };
   }
 }
 
@@ -89,23 +110,34 @@ export async function verifyStaffPinAction(pinInput: string) {
 }
 
 export async function startSessionAction() {
-  const repo = getRepository();
-  await repo.startSession();
-  refreshPool();
-  refreshHistory();
+  try {
+    const repo = getRepository();
+    await repo.startSession();
+    refreshPool();
+    refreshHistory();
+    return { ok: true as const };
+  } catch (err) {
+    return { ok: false as const, error: errorMessage(err, "Could not start session.") };
+  }
 }
 
 export async function closeSessionAction(sessionId: string) {
-  const repo = getRepository();
-  const active = await repo.listActiveAttendance(sessionId);
-  if (active.length > 0) {
-    throw new Error(
-      `${active.length} child(ren) still checked in. Check them out before closing.`,
-    );
+  try {
+    const repo = getRepository();
+    const active = await repo.listActiveAttendance(sessionId);
+    if (active.length > 0) {
+      return {
+        ok: false as const,
+        error: `${active.length} child(ren) still checked in. Check them out before closing.`,
+      };
+    }
+    await repo.closeSession(sessionId);
+    refreshPool();
+    refreshHistory();
+    return { ok: true as const };
+  } catch (err) {
+    return { ok: false as const, error: errorMessage(err, "Could not close session.") };
   }
-  await repo.closeSession(sessionId);
-  refreshPool();
-  refreshHistory();
 }
 
 export async function searchChildrenAction(query: string) {
@@ -114,16 +146,7 @@ export async function searchChildrenAction(query: string) {
 
 export async function registerFamilyAction(input: RegisterInput) {
   try {
-    if (
-      process.env.VERCEL &&
-      process.env.KIDS_DATA_SOURCE !== "supabase"
-    ) {
-      return {
-        ok: false as const,
-        error:
-          "Database not configured on Vercel. Set KIDS_DATA_SOURCE=supabase and Supabase keys in Project → Environment Variables.",
-      };
-    }
+    resolveDataSource();
 
     if (!input.parent.fullName.trim()) {
       return { ok: false as const, error: "Parent name is required." };
