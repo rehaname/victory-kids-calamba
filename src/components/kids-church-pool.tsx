@@ -36,9 +36,18 @@ import {
 type Props = {
   session: Session | null;
   active: AttendanceWithChild[];
+  configError?: string | null;
+  dataSource?: "supabase" | "memory" | "error";
+  missingEnv?: string[];
 };
 
-export function KidsChurchPool({ session, active }: Props) {
+export function KidsChurchPool({
+  session,
+  active,
+  configError = null,
+  dataSource = "supabase",
+  missingEnv = [],
+}: Props) {
   const [pending, startTransition] = useTransition();
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [selectedChild, setSelectedChild] = useState<AttendanceWithChild | null>(null);
@@ -88,17 +97,42 @@ export function KidsChurchPool({ session, active }: Props) {
         pending={pending}
         onStartSession={() =>
           run(async () => {
-            await startSessionAction();
+            const result = await startSessionAction();
+            if (!result.ok) throw new Error(result.error);
             setCheckInOpen(true);
           }, "Kids Church session started")
         }
         onCloseSession={() =>
           session &&
-          run(async () => closeSessionAction(session.id), "Session closed")
+          run(async () => {
+            const result = await closeSessionAction(session.id);
+            if (!result.ok) throw new Error(result.error);
+          }, "Session closed")
         }
       />
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6">
+        {configError && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800">
+            <p className="font-semibold">Database not connected — sessions will not be saved</p>
+            <p className="mt-1">{configError}</p>
+            {missingEnv.length > 0 && (
+              <p className="mt-2 font-mono text-xs text-red-700">
+                Missing on Vercel: {missingEnv.join(", ")}
+              </p>
+            )}
+            <p className="mt-2 text-red-700/80">
+              Vercel → Project Settings → Environment Variables → add the Supabase keys, set
+              KIDS_DATA_SOURCE=supabase, then Redeploy.
+            </p>
+          </div>
+        )}
+        {dataSource === "memory" && !configError && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Demo mode (in-memory). Start/Close session is temporary and disappears on refresh.
+            Set Supabase env vars on Vercel to save sessions permanently.
+          </div>
+        )}
         {session ? (
           <>
             <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
@@ -112,7 +146,8 @@ export function KidsChurchPool({ session, active }: Props) {
                   </p>
                 </div>
                 <Button
-                  className="h-12 bg-[#003B8E] px-6 text-base text-white hover:bg-[#002c6b]"
+                  size="xl"
+                  className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b] sm:w-auto"
                   onClick={() => setCheckInOpen(true)}
                 >
                   Check in a child
@@ -172,15 +207,21 @@ export function KidsChurchPool({ session, active }: Props) {
                 ) : null}
                 <DetailRow label="Time In" value={formatTime(selectedChild.timeIn)} />
               </dl>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="outline" onClick={() => setSelectedChild(null)}>
-                  Close
-                </Button>
+              <DialogFooter className="flex-col gap-3 sm:flex-col">
                 <Button
-                  className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
+                  size="xl"
+                  className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b]"
                   onClick={() => beginCheckout(selectedChild)}
                 >
-                  Out
+                  Checkout
+                </Button>
+                <Button
+                  size="xl"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setSelectedChild(null)}
+                >
+                  Close
                 </Button>
               </DialogFooter>
             </>
@@ -199,7 +240,7 @@ export function KidsChurchPool({ session, active }: Props) {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Time out</DialogTitle>
+            <DialogTitle>Checkout</DialogTitle>
             <DialogDescription>
               {checkoutTarget
                 ? `Claiming ${childFullName(checkoutTarget.child.firstName, checkoutTarget.child.lastName)}. Type the full name of the person picking up.`
@@ -210,7 +251,7 @@ export function KidsChurchPool({ session, active }: Props) {
             <Label htmlFor="claimant">Claimant full name</Label>
             <Input
               id="claimant"
-              className="h-12 text-base"
+              className="h-14 text-lg"
               value={claimantName}
               onChange={(e) => setClaimantName(e.target.value)}
               placeholder="e.g. Juan Dela Cruz"
@@ -224,7 +265,8 @@ export function KidsChurchPool({ session, active }: Props) {
           </div>
           <DialogFooter>
             <Button
-              className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
+              size="xl"
+              className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b]"
               disabled={pending || !claimantName.trim()}
               onClick={() => {
                 if (!checkoutTarget) return;
@@ -235,7 +277,7 @@ export function KidsChurchPool({ session, active }: Props) {
                 }, "Checked out");
               }}
             >
-              Confirm Time Out
+              Confirm Checkout
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -277,13 +319,13 @@ function PoolColumn({
               key={row.id}
               type="button"
               onClick={() => onSelect(row)}
-              className="w-full rounded-xl border border-black/10 bg-[#f7f9fc] p-3 text-left transition hover:border-[#003B8E]/40 hover:bg-[#eef4ff] active:scale-[0.99]"
+              className="w-full rounded-xl border border-black/10 bg-[#f7f9fc] p-4 text-left transition hover:border-[#003B8E]/40 hover:bg-[#eef4ff] active:scale-[0.99]"
             >
-              <p className="text-base font-semibold">
+              <p className="text-lg font-semibold">
                 {childFullName(row.child.firstName, row.child.lastName)}
               </p>
-              <p className="text-sm text-black/55">Parent: {row.child.parent.fullName}</p>
-              <p className="mt-1 text-xs text-black/40">
+              <p className="text-base text-black/55">Parent: {row.child.parent.fullName}</p>
+              <p className="mt-1 text-sm text-black/40">
                 Age {getAge(row.child.birthday)} · In {formatTime(row.timeIn)}
               </p>
             </button>

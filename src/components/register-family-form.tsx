@@ -123,7 +123,7 @@ export function RegisterFamilyForm({
                   <Label>Birthday</Label>
                   <Input
                     type="date"
-                    className="h-12"
+                    className="h-14 text-base"
                     required
                     value={kid.birthday}
                     onChange={(e) =>
@@ -145,7 +145,7 @@ export function RegisterFamilyForm({
                   <select
                     id={`home-service-${index}`}
                     required
-                    className="h-12 w-full rounded-md border border-black/15 bg-white px-3 text-base"
+                    className="h-14 w-full rounded-md border border-black/15 bg-white px-3 text-base"
                     value={kid.homeService}
                     onChange={(e) =>
                       onKidsChange(
@@ -169,6 +169,8 @@ export function RegisterFamilyForm({
         <Button
           type="button"
           variant="outline"
+          size="xl"
+          className="w-full sm:w-auto"
           onClick={() => onKidsChange([...kids, emptyChild()])}
         >
           Add another child
@@ -187,16 +189,17 @@ export function RegisterFamilyForm({
         </label>
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         {onCancel && (
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" size="xl" className="w-full sm:w-auto" onClick={onCancel}>
             Back
           </Button>
         )}
         <Button
           type="submit"
+          size="xl"
           disabled={pending}
-          className="h-12 bg-[#003B8E] text-base text-white hover:bg-[#002c6b]"
+          className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b] sm:w-auto"
         >
           {submitLabel}
         </Button>
@@ -220,7 +223,7 @@ function Field({
     <div className="space-y-2">
       <Label>{label}</Label>
       <Input
-        className="h-12 text-base"
+        className="h-14 text-base"
         value={value}
         required={required}
         onChange={(e) => onChange(e.target.value)}

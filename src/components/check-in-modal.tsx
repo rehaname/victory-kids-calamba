@@ -109,7 +109,7 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
                 value={query}
                 onChange={(e) => onSearch(e.target.value)}
                 placeholder="Start typing a name…"
-                className="h-12 text-base"
+                className="h-14 text-lg"
                 autoFocus
               />
             </div>
@@ -128,22 +128,23 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
                     return (
                       <div
                         key={child.id}
-                        className="flex flex-col gap-3 rounded-xl border border-black/10 p-3 sm:flex-row sm:items-center sm:justify-between"
+                        className="flex flex-col gap-3 rounded-xl border border-black/10 p-4 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div>
-                          <p className="text-base font-semibold">
+                          <p className="text-lg font-semibold">
                             {childFullName(child.firstName, child.lastName)}
                           </p>
-                          <p className="text-sm text-black/55">
+                          <p className="text-base text-black/55">
                             Parent: {child.parent.fullName}
                           </p>
-                          <p className="text-xs text-black/40">
+                          <p className="text-sm text-black/40">
                             {pool ? AGE_POOL_LABELS[pool] : `Age ${age} · outside 4–12 range`}
                           </p>
                         </div>
                         <Button
+                          size="xl"
                           disabled={alreadyIn || pending || !pool}
-                          className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
+                          className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b] sm:w-auto"
                           onClick={() =>
                             run(async () => {
                               await checkInAction(child.id);
@@ -162,11 +163,12 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
             )}
 
             <div className="border-t border-black/10 pt-4">
-              <p className="mb-3 text-sm text-black/55">First time at Kids Church?</p>
+              <p className="mb-3 text-base text-black/55">First time at Kids Church?</p>
               <Button
                 type="button"
                 variant="outline"
-                className="h-12 w-full text-base"
+                size="xl"
+                className="w-full"
                 onClick={() => setMode("register")}
               >
                 Register new child

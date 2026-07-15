@@ -22,16 +22,22 @@ export function extractPinFromRemarks(remarks: string | null | undefined) {
   const raw = (remarks ?? "").trim();
   if (!raw) return null;
   if (/^\d{6}$/.test(raw)) return raw;
-  const match = raw.match(/(?:pin[:\s-]*)?(\d{6})/i);
-  return match?.[1] ?? null;
+  const labeled = raw.match(/pin[:\s-]*(\d{6})/i);
+  if (labeled?.[1]) return labeled[1];
+  return null;
 }
 
-export function staffPinConfigured() {
+export function hasSupabaseKeys() {
   return (
     Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
-    Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
-    process.env.KIDS_DATA_SOURCE === "supabase"
+    Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) &&
+    Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)
   );
+}
+
+/** True when PIN should be read from profiles.remarks (Supabase keys present). */
+export function staffPinConfigured() {
+  return hasSupabaseKeys();
 }
 
 export { TENANT };

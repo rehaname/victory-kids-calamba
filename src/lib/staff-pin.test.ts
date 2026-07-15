@@ -17,5 +17,6 @@ test("extractPinFromRemarks reads bare or labeled PIN", () => {
   assert.equal(extractPinFromRemarks("331616"), "331616");
   assert.equal(extractPinFromRemarks("PIN: 331616"), "331616");
   assert.equal(extractPinFromRemarks("kiosk pin 777777 for staff"), "777777");
+  assert.equal(extractPinFromRemarks("call 09171234567"), null);
   assert.equal(extractPinFromRemarks(""), null);
 });

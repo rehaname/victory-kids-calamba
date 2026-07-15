@@ -53,17 +53,17 @@ export function KioskHeader({
 
         <div className="flex flex-wrap items-center gap-2">
           {showPoolLink && (
-            <Button variant="ghost" asChild className="text-[#003B8E]">
+            <Button variant="ghost" size="xl" asChild className="text-[#003B8E]">
               <Link href="/">Kids Church</Link>
             </Button>
           )}
           {showRegisterLink && (
-            <Button variant="ghost" asChild className="text-[#003B8E]">
+            <Button variant="ghost" size="xl" asChild className="text-[#003B8E]">
               <Link href="/register">Register</Link>
             </Button>
           )}
           {showHistoryLink && (
-            <Button variant="ghost" asChild className="text-[#003B8E]">
+            <Button variant="ghost" size="xl" asChild className="text-[#003B8E]">
               <Link href="/history">History</Link>
             </Button>
           )}
@@ -71,19 +71,20 @@ export function KioskHeader({
           {showSessionControls && (
             session ? (
               <>
-                <Badge className="bg-[#003B8E] px-3 py-1 text-sm text-white hover:bg-[#003B8E]">
+                <Badge className="bg-[#003B8E] px-3 py-1.5 text-sm text-white hover:bg-[#003B8E]">
                   Session open · {formatSessionLabel(session.startedAt)}
                 </Badge>
-                <Button variant="outline" disabled={pending} onClick={onCloseSession}>
+                <Button size="xl" variant="outline" disabled={pending} onClick={onCloseSession}>
                   Close session
                 </Button>
               </>
             ) : (
               <>
-                <Badge variant="secondary" className="px-3 py-1 text-sm">
+                <Badge variant="secondary" className="px-3 py-1.5 text-sm">
                   No open session
                 </Badge>
                 <Button
+                  size="xl"
                   className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
                   disabled={pending}
                   onClick={onStartSession}
