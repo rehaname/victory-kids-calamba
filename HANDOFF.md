@@ -6,6 +6,8 @@ PR: https://github.com/rehaname/victory-kids-calamba/pull/1
 Repo: https://github.com/rehaname/victory-kids-calamba  
 Base branch: `main`
 
+Related multi-tenant handoff: [`HANDOFF-MULTI-TENANT.md`](./HANDOFF-MULTI-TENANT.md)
+
 ## Goal
 
 Build a simple staff-managed Kids Church check-in kiosk for Victory Calamba (iPad/laptop). Parents type on the church device; staff starts/closes sessions. No parent accounts.
