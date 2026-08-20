@@ -5,6 +5,7 @@ import {
   defaultSessionName,
   manilaDate,
   normalizeServiceTime,
+  requireServiceTime,
 } from "@/lib/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
@@ -186,7 +187,7 @@ export const supabaseRepository: KidsRepository = {
   async startSession(input?: StartSessionInput) {
     const supabase = db();
     const startedAt = new Date();
-    const serviceTime = normalizeServiceTime(input?.serviceTime);
+    const serviceTime = requireServiceTime(input?.serviceTime);
     const { data, error } = await supabase
       .from("sessions")
       .insert({
@@ -201,9 +202,7 @@ export const supabaseRepository: KidsRepository = {
       // Partial unique index sessions_one_open_per_service_idx.
       if (isUniqueViolation(error)) {
         throw new Error(
-          serviceTime
-            ? `The ${serviceTime.toUpperCase()} service already has an open session today.`
-            : "A session is already open. Pick a service time to start another.",
+          `The ${serviceTime.toUpperCase()} service already has an open session today.`,
         );
       }
       throwDb(error, "Could not start session");
@@ -291,9 +290,10 @@ export const supabaseRepository: KidsRepository = {
     if (childError) throwDb(childError, "Could not save children");
 
     const children: Child[] = ((childRows ?? []) as ChildRow[]).map((row) => {
-      const mapped = mapChild(row, parent);
-      const { parent: _p, ...rest } = mapped;
-      return rest;
+      // The caller already has the parent; drop the copy hanging off each child.
+      const { parent: _unused, ...child } = mapChild(row, parent);
+      void _unused;
+      return child;
     });
 
     return { parent, children };

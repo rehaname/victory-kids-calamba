@@ -75,6 +75,23 @@ export type RegisterInput = {
     homeService: string;
   }>;
   checkInNow?: boolean;
+  /** When checking in immediately, target this session instead of the newest open one. */
+  sessionId?: string;
+};
+
+/**
+ * What the public kiosk search is allowed to return. No last name, address,
+ * contact number, or birthday — only enough to recognise the right child.
+ */
+export type KioskChildHit = {
+  id: string;
+  firstName: string;
+  lastInitial: string;
+  nickname: string;
+  parentFirstName: string;
+  parentLastInitial: string;
+  age: number;
+  agePool: AgePool | null;
 };
 
 /**

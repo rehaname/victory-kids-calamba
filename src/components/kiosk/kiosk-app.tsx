@@ -105,7 +105,7 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
     setCheckingInChildId(null);
   }, []);
 
-  useIdleReset(step === "receipt" || step === "prompt", resetToHome);
+  useIdleReset(step !== "home", resetToHome);
 
   function requireSession(): boolean {
     if (activeSession) return true;

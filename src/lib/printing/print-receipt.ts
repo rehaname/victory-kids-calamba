@@ -68,15 +68,25 @@ export async function printTestSlip(): Promise<void> {
 }
 
 /**
- * Awaits a paint before opening the dialog, so a slip that was only just added
- * to the DOM is actually on screen for the browser to capture. Resolves once
- * the dialog has been dismissed, which keeps callers from tearing the slip down
- * too early.
+ * Opens the system print dialog against whatever currently carries
+ * `data-print-target`. Resolves after the dialog is dismissed, or after a
+ * timeout on browsers (iOS Safari) that never fire `afterprint`.
  */
 export async function systemPrint(): Promise<void> {
   if (typeof window === "undefined") return;
   await nextPaint();
-  window.print();
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("afterprint", done);
+      resolve();
+    };
+    window.addEventListener("afterprint", done);
+    window.print();
+    window.setTimeout(done, 1500);
+  });
 }
 
 function nextPaint(): Promise<void> {

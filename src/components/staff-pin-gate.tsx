@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { toast } from "sonner";
 import { verifyStaffPinAction } from "@/app/actions";
 import { normalizePin, STAFF_UNLOCK_KEY } from "@/lib/staff-pin";
@@ -11,24 +11,22 @@ type Props = {
 };
 
 export function StaffPinGate({ children }: Props) {
-  const [ready, setReady] = useState(false);
-  const [unlocked, setUnlocked] = useState(false);
+  const storedUnlock = useStoredUnlock();
+  const [unlockedNow, setUnlockedNow] = useState(false);
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
-  useEffect(() => {
-    try {
-      setUnlocked(sessionStorage.getItem(STAFF_UNLOCK_KEY) === "1");
-    } catch {
-      setUnlocked(false);
-    }
-    setReady(true);
-  }, []);
+  // Null means the browser has not been read yet, which only happens on the
+  // server render and the hydration pass.
+  const ready = storedUnlock !== null;
+  const unlocked = unlockedNow || storedUnlock === true;
 
   function press(digit: string) {
     setError("");
-    setPin((prev) => normalizePin(prev + digit));
+    const next = normalizePin(pin + digit);
+    setPin(next);
+    if (next.length === 6) submit(next);
   }
 
   function clear() {
@@ -55,17 +53,10 @@ export function StaffPinGate({ children }: Props) {
       } catch {
         // Private mode may block sessionStorage; still unlock this render.
       }
-      setUnlocked(true);
+      setUnlockedNow(true);
       toast.success("Welcome — Kids Church unlocked");
     });
   }
-
-  useEffect(() => {
-    if (pin.length === 6 && !pending) {
-      submit(pin);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pin]);
 
   if (!ready) {
     return (
@@ -168,4 +159,30 @@ export function StaffPinGate({ children }: Props) {
       </div>
     </div>
   );
+}
+
+/**
+ * Reads the per-tab unlock flag. sessionStorage does not exist during the
+ * server render, so the server snapshot is null and the gate shows a neutral
+ * loading state until hydration settles.
+ */
+function useStoredUnlock(): boolean | null {
+  return useSyncExternalStore(subscribeUnlock, getUnlock, getServerUnlock);
+}
+
+function subscribeUnlock(listener: () => void): () => void {
+  window.addEventListener("storage", listener);
+  return () => window.removeEventListener("storage", listener);
+}
+
+function getUnlock(): boolean {
+  try {
+    return sessionStorage.getItem(STAFF_UNLOCK_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function getServerUnlock(): null {
+  return null;
 }

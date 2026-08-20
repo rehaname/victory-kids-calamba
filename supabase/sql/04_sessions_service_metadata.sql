@@ -1,6 +1,10 @@
 -- Name Kids-Church sessions and allow one open session per service time per day.
 -- Before this, a partial unique index allowed exactly one open session overall,
 -- so "select the live session" had nothing to choose between.
+-- Apply AFTER any currently open session has been closed.
+-- Existing open rows get service_time = '' from the column default; starting a
+-- named 9AM session beside that would create a second live session, and the
+-- staff pool would stop showing kids from the unnamed one.
 -- Safe / idempotent. Does not touch iosifin.
 
 alter table victory_calamba.sessions

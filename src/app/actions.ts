@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { diagnoseDataSource, getRepository, resolveDataSource } from "@/lib/data";
 import { errorMessage } from "@/lib/errors";
+import { toKioskChildHit } from "@/lib/kiosk-search";
 import {
   DEFAULT_STAFF_PIN,
   extractPinFromRemarks,
@@ -11,10 +12,12 @@ import {
   staffPinConfigured,
 } from "@/lib/staff-pin";
 import { buildReceipt } from "@/lib/receipt";
+import { requireServiceTime } from "@/lib/session";
 import { createPublicAdminClient } from "@/lib/supabase/public-admin";
 import { TENANT } from "@/lib/tenant";
 import type {
   AttendanceWithChild,
+  KioskChildHit,
   Receipt,
   RegisterInput,
   Session,
@@ -36,6 +39,7 @@ function refreshChildren() {
 
 export type DashboardData = {
   session: Session | null;
+  openSessions: Session[];
   active: AttendanceWithChild[];
   sessions: Session[];
   dataSource: "supabase" | "memory" | "error";
@@ -49,11 +53,13 @@ export async function getDashboardData(): Promise<DashboardData> {
   try {
     const dataSource = resolveDataSource();
     const repo = getRepository();
-    const session = await repo.getOpenSession();
+    const openSessions = await repo.listOpenSessions();
+    const session = openSessions[0] ?? null;
     const active = session ? await repo.listActiveAttendance(session.id) : [];
     const sessions = await repo.listSessions();
     return {
       session,
+      openSessions,
       active,
       sessions,
       dataSource,
@@ -65,6 +71,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     console.error("getDashboardData failed:", message);
     return {
       session: null,
+      openSessions: [],
       active: [],
       sessions: [],
       dataSource: "error",
@@ -126,10 +133,11 @@ export async function verifyStaffPinAction(pinInput: string) {
   return { ok: true as const };
 }
 
-export async function startSessionAction(serviceTime?: string) {
+export async function startSessionAction(serviceTime: string) {
   try {
+    requireServiceTime(serviceTime);
     const repo = getRepository();
-    const session = await repo.startSession({ serviceTime: serviceTime ?? "" });
+    const session = await repo.startSession({ serviceTime });
     refreshPool();
     refreshHistory();
     return { ok: true as const, session };
@@ -170,6 +178,22 @@ export async function searchChildrenAction(query: string) {
   return getRepository().searchChildren(query);
 }
 
+/**
+ * Public kiosk search. Same matching as the staff search, but the payload is
+ * stripped to first name + last initial so a walk-up tablet cannot dump the roster.
+ */
+export async function kioskSearchChildrenAction(query: string): Promise<KioskChildHit[]> {
+  const q = query.trim();
+  if (q.length < 3) return [];
+  try {
+    const rows = await getRepository().searchChildren(q);
+    return rows.map(toKioskChildHit);
+  } catch (err) {
+    console.error("kioskSearchChildrenAction failed:", errorMessage(err));
+    return [];
+  }
+}
+
 export async function listChildrenAction() {
   try {
     return await getRepository().listChildren();
@@ -201,8 +225,10 @@ export async function registerFamilyAction(input: RegisterInput) {
     const repo = getRepository();
     const result = await repo.registerFamily(input);
     if (input.checkInNow) {
-      const session = await repo.getOpenSession();
-      if (!session) {
+      const session = input.sessionId
+        ? await repo.getSession(input.sessionId)
+        : await repo.getOpenSession();
+      if (!session || session.status !== "open") {
         return {
           ok: false as const,
           error: "Family saved, but no open session — start Kids Church to check in.",

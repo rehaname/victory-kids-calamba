@@ -3,7 +3,7 @@ import type { KidsRepository } from "@/lib/data/repository";
 import {
   defaultSessionName,
   manilaDate,
-  normalizeServiceTime,
+  requireServiceTime,
 } from "@/lib/session";
 import type {
   Attendance,
@@ -88,7 +88,7 @@ export const memoryRepository: KidsRepository = {
 
   async startSession(input?: StartSessionInput) {
     const startedAt = new Date();
-    const serviceTime = normalizeServiceTime(input?.serviceTime);
+    const serviceTime = requireServiceTime(input?.serviceTime);
     const sessionDate = manilaDate(startedAt);
 
     // Mirrors sessions_one_open_per_service_idx in Postgres.
@@ -100,9 +100,7 @@ export const memoryRepository: KidsRepository = {
     );
     if (clash) {
       throw new Error(
-        serviceTime
-          ? `The ${serviceTime.toUpperCase()} service already has an open session today.`
-          : "A session is already open. Pick a service time to start another.",
+        `The ${serviceTime.toUpperCase()} service already has an open session today.`,
       );
     }
 

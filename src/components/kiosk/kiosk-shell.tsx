@@ -1,5 +1,10 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+
+/** Long enough for the iOS keyboard slide-up to settle. */
+const KEYBOARD_SETTLE_MS = 300;
 
 type Props = {
   /** Rendered at the top right, beside the branding. */
@@ -13,6 +18,9 @@ type Props = {
  * submit button never ends up behind a tablet's on-screen keyboard.
  */
 export function KioskShell({ actions, banner, children }: Props) {
+  const scrollRef = useRef<HTMLElement | null>(null);
+  useKeepFocusVisible(scrollRef);
+
   return (
     <div
       data-print-hidden
@@ -44,13 +52,46 @@ export function KioskShell({ actions, banner, children }: Props) {
 
       {banner}
 
-      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <main
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
         <div className="mx-auto flex min-h-full max-w-3xl flex-col px-4 py-5 sm:px-6 sm:py-8">
           {children}
         </div>
       </main>
     </div>
   );
+}
+
+/**
+ * A tablet keyboard covers the lower half of the screen without resizing the
+ * layout, so a field near the bottom of a form ends up hidden behind it. This
+ * scrolls whatever the parent just tapped into back into view.
+ */
+function useKeepFocusVisible(scrollRef: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    let timer = 0;
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.matches("input, select, textarea")) return;
+
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, KEYBOARD_SETTLE_MS);
+    };
+
+    container.addEventListener("focusin", onFocusIn);
+    return () => {
+      window.clearTimeout(timer);
+      container.removeEventListener("focusin", onFocusIn);
+    };
+  }, [scrollRef]);
 }
 
 export function KioskBanner({

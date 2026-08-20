@@ -1,36 +1,44 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatSessionLabel } from "@/lib/age";
+import { sessionDisplayName } from "@/lib/session";
 import type { Session } from "@/lib/types";
 
 type Props = {
   title?: string;
   subtitle?: string;
   session?: Session | null;
-  showSessionControls?: boolean;
+  openSessions?: Session[];
   pending?: boolean;
+  showSessionControls?: boolean;
   onStartSession?: () => void;
   onCloseSession?: () => void;
+  onSelectSession?: (sessionId: string) => void;
   showHistoryLink?: boolean;
   showRegisterLink?: boolean;
   showListLink?: boolean;
   showPoolLink?: boolean;
+  showKioskLink?: boolean;
 };
 
 export function KioskHeader({
   title = "Kids Church",
   subtitle = "Check-In Pool",
   session = null,
-  showSessionControls = false,
+  openSessions = [],
   pending = false,
+  showSessionControls = false,
   onStartSession,
   onCloseSession,
+  onSelectSession,
   showHistoryLink = true,
   showRegisterLink = true,
   showListLink = true,
   showPoolLink = false,
+  showKioskLink = true,
 }: Props) {
+  const extraOpen = Math.max(0, openSessions.length - (session ? 1 : 0));
+
   return (
     <header className="border-b border-black/10 bg-white/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -59,6 +67,11 @@ export function KioskHeader({
               <Link href="/">Kids Church</Link>
             </Button>
           )}
+          {showKioskLink && (
+            <Button variant="ghost" size="xl" asChild className="text-[#003B8E]">
+              <Link href="/kiosk">Kiosk</Link>
+            </Button>
+          )}
           {showRegisterLink && (
             <Button variant="ghost" size="xl" asChild className="text-[#003B8E]">
               <Link href="/register">Register</Link>
@@ -78,9 +91,29 @@ export function KioskHeader({
           {showSessionControls && (
             session ? (
               <>
-                <Badge className="bg-[#003B8E] px-3 py-1.5 text-sm text-white hover:bg-[#003B8E]">
-                  Session open · {formatSessionLabel(session.startedAt)}
-                </Badge>
+                {openSessions.length > 1 && onSelectSession ? (
+                  <select
+                    aria-label="Live session"
+                    className="h-14 rounded-xl border border-black/15 bg-white px-3 text-sm font-medium"
+                    value={session.id}
+                    disabled={pending}
+                    onChange={(e) => onSelectSession(e.target.value)}
+                  >
+                    {openSessions.map((open) => (
+                      <option key={open.id} value={open.id}>
+                        {sessionDisplayName(open)}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Badge className="bg-[#003B8E] px-3 py-1.5 text-sm text-white hover:bg-[#003B8E]">
+                    {sessionDisplayName(session)}
+                    {extraOpen > 0 ? ` · +${extraOpen} more` : " · open"}
+                  </Badge>
+                )}
+                <Button size="xl" variant="outline" disabled={pending} onClick={onStartSession}>
+                  Start another
+                </Button>
                 <Button size="xl" variant="outline" disabled={pending} onClick={onCloseSession}>
                   Close session
                 </Button>

@@ -18,6 +18,14 @@ export function normalizeServiceTime(value: string | null | undefined): string {
   return (SERVICE_TIMES as readonly string[]).includes(candidate) ? candidate : "";
 }
 
+export function requireServiceTime(value: string | null | undefined): string {
+  const normalized = normalizeServiceTime(value);
+  if (!normalized) {
+    throw new Error("Pick a service time (9AM, 11AM, 2PM, or 4PM).");
+  }
+  return normalized;
+}
+
 export function formatServiceTime(serviceTime: string): string {
   const normalized = normalizeServiceTime(serviceTime);
   return normalized ? normalized.toUpperCase() : "";

@@ -27,7 +27,6 @@ export function diagnoseDataSource(): DataSourceDiagnostics {
   const hasAnonKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
   const kidsDataSource = process.env.KIDS_DATA_SOURCE?.trim() || null;
-  const forced = kidsDataSource?.toLowerCase() ?? null;
 
   const missing: string[] = [];
   if (!hasUrl) missing.push("NEXT_PUBLIC_SUPABASE_URL");

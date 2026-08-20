@@ -2,6 +2,7 @@
 
 import { Check, ChevronLeft, ChevronRight, Printer } from "lucide-react";
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { ReceiptSlip } from "@/components/kiosk/receipt-slip";
 import { Button } from "@/components/ui/button";
@@ -23,18 +24,23 @@ export function KioskReceiptStep({ receipts, onDone }: Props) {
   const receipt = receipts[Math.min(index, receipts.length - 1)];
   const many = receipts.length > 1;
 
-  async function print(target: Receipt) {
+  async function send(target: Receipt) {
+    const outcome = await printReceipt(target);
+    setPrinted((prev) => (prev.includes(target.attendanceId) ? prev : [...prev, target.attendanceId]));
+    if (outcome.via === "system") {
+      toast.info("Opened the system print dialog", {
+        description: outcome.reason,
+      });
+    } else {
+      toast.success(`Printed ${target.displayName}'s slip`);
+    }
+  }
+
+  async function printCurrent() {
+    if (!receipt) return;
     setPrinting(true);
     try {
-      const outcome = await printReceipt(target);
-      setPrinted((prev) => (prev.includes(target.attendanceId) ? prev : [...prev, target.attendanceId]));
-      if (outcome.via === "system") {
-        toast.info("Opened the system print dialog", {
-          description: outcome.reason,
-        });
-      } else {
-        toast.success(`Printed ${target.displayName}'s slip`);
-      }
+      await send(receipt);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not print");
     } finally {
@@ -43,11 +49,18 @@ export function KioskReceiptStep({ receipts, onDone }: Props) {
   }
 
   async function printAll() {
-    for (let i = 0; i < receipts.length; i += 1) {
-      // Bring each slip on screen first: the system print fallback captures
-      // whatever is visible, and a thermal printer cannot interleave two jobs.
-      setIndex(i);
-      await print(receipts[i]);
+    setPrinting(true);
+    try {
+      for (let i = 0; i < receipts.length; i += 1) {
+        // The system-print fallback captures the on-screen slip, so the DOM
+        // must actually show receipts[i] before we call print().
+        flushSync(() => setIndex(i));
+        await send(receipts[i]);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not print");
+    } finally {
+      setPrinting(false);
     }
   }
 
@@ -119,7 +132,7 @@ export function KioskReceiptStep({ receipts, onDone }: Props) {
         <Button
           size="xl"
           disabled={printing}
-          onClick={() => (many ? printAll() : print(receipt))}
+          onClick={() => (many ? printAll() : printCurrent())}
           className="h-16 rounded-2xl bg-[#003B8E] text-lg font-semibold text-white hover:bg-[#002c6b]"
         >
           <Printer className="size-5" />

@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   checkOutAction,
   closeSessionAction,
+  getSessionRosterAction,
   startSessionAction,
 } from "@/app/actions";
 import {
@@ -16,9 +17,11 @@ import {
   getAgePool,
   sortByAgeThenName,
 } from "@/lib/age";
+import { sessionDisplayName } from "@/lib/session";
 import type { AgePool, AttendanceWithChild, Session } from "@/lib/types";
 import { CheckInModal } from "@/components/check-in-modal";
 import { KioskHeader } from "@/components/kiosk-header";
+import { StartSessionDialog } from "@/components/start-session-dialog";
 import { DEFAULT_HOME_SERVICE } from "@/components/register-family-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +38,7 @@ import {
 
 type Props = {
   session: Session | null;
+  openSessions: Session[];
   active: AttendanceWithChild[];
   configError?: string | null;
   dataSource?: "supabase" | "memory" | "error";
@@ -42,17 +46,52 @@ type Props = {
 };
 
 export function KidsChurchPool({
-  session,
-  active,
+  session: initialSession,
+  openSessions: initialOpenSessions,
+  active: initialActive,
   configError = null,
   dataSource = "supabase",
   missingEnv = [],
 }: Props) {
   const [pending, startTransition] = useTransition();
   const [checkInOpen, setCheckInOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [rowsBySession, setRowsBySession] = useState<Record<string, AttendanceWithChild[]>>(
+    () => (initialSession ? { [initialSession.id]: initialActive } : {}),
+  );
   const [selectedChild, setSelectedChild] = useState<AttendanceWithChild | null>(null);
   const [checkoutTarget, setCheckoutTarget] = useState<AttendanceWithChild | null>(null);
   const [claimantName, setClaimantName] = useState("");
+
+  const selected =
+    initialOpenSessions.find((s) => s.id === pickedId) ??
+    initialOpenSessions.find((s) => s.id === initialSession?.id) ??
+    initialOpenSessions[0] ??
+    null;
+
+  const selectedId = selected?.id ?? null;
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    getSessionRosterAction(selectedId).then((rows) => {
+      if (!cancelled) {
+        setRowsBySession((prev) => ({ ...prev, [selectedId]: rows }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  const active = useMemo(() => {
+    if (selectedId == null) return [];
+    return (
+      rowsBySession[selectedId] ??
+      (selectedId === initialSession?.id ? initialActive : [])
+    );
+  }, [selectedId, rowsBySession, initialSession?.id, initialActive]);
 
   const pools = useMemo(() => {
     const grouped: Record<AgePool, AttendanceWithChild[]> = {
@@ -87,26 +126,33 @@ export function KidsChurchPool({
     setClaimantName("");
   }
 
+  function startSession(serviceTime: string) {
+    run(async () => {
+      const result = await startSessionAction(serviceTime);
+      if (!result.ok) throw new Error(result.error);
+      setPickedId(result.session.id);
+      setStartOpen(false);
+      setCheckInOpen(true);
+    }, `${serviceTime.toUpperCase()} service started`);
+  }
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#e8f0ff_0%,_#ffffff_45%,_#f4f6f8_100%)] text-black">
       <KioskHeader
         title="Kids Church"
         subtitle="Check-in pool · ages 4–12"
-        session={session}
+        session={selected}
+        openSessions={initialOpenSessions}
         showSessionControls
         pending={pending}
-        onStartSession={() =>
-          run(async () => {
-            const result = await startSessionAction();
-            if (!result.ok) throw new Error(result.error);
-            setCheckInOpen(true);
-          }, "Kids Church session started")
-        }
+        onSelectSession={setPickedId}
+        onStartSession={() => setStartOpen(true)}
         onCloseSession={() =>
-          session &&
+          selected &&
           run(async () => {
-            const result = await closeSessionAction(session.id);
+            const result = await closeSessionAction(selected.id);
             if (!result.ok) throw new Error(result.error);
+            setPickedId(null);
           }, "Session closed")
         }
       />
@@ -133,7 +179,7 @@ export function KidsChurchPool({
             Set Supabase env vars on Vercel to save sessions permanently.
           </div>
         )}
-        {session ? (
+        {selected ? (
           <>
             <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -142,7 +188,9 @@ export function KidsChurchPool({
                     Kids Church is open
                   </h2>
                   <p className="text-sm text-black/55">
-                    Parents can check in an existing child or register a new one.
+                    {selected
+                      ? `${sessionDisplayName(selected)} · parents can check in an existing child or register a new one.`
+                      : "Parents can check in an existing child or register a new one."}
                   </p>
                 </div>
                 <Button
@@ -176,9 +224,25 @@ export function KidsChurchPool({
       </main>
 
       <CheckInModal
-        open={checkInOpen && Boolean(session)}
+        open={checkInOpen && Boolean(selected)}
         onOpenChange={setCheckInOpen}
+        sessionId={selected?.id ?? ""}
         active={active}
+        onRegistered={() => {
+          if (selectedId) {
+            getSessionRosterAction(selectedId).then((rows) => {
+              setRowsBySession((prev) => ({ ...prev, [selectedId]: rows }));
+            });
+          }
+        }}
+      />
+
+      <StartSessionDialog
+        open={startOpen}
+        onOpenChange={setStartOpen}
+        liveServiceTimes={initialOpenSessions.map((s) => s.serviceTime).filter(Boolean)}
+        pending={pending}
+        onStart={startSession}
       />
 
       <Dialog open={Boolean(selectedChild)} onOpenChange={(open) => !open && setSelectedChild(null)}>
@@ -277,6 +341,10 @@ export function KidsChurchPool({
                   await checkOutAction(checkoutTarget.id, claimantName);
                   setCheckoutTarget(null);
                   setClaimantName("");
+                  if (selectedId) {
+                    const rows = await getSessionRosterAction(selectedId);
+                    setRowsBySession((prev) => ({ ...prev, [selectedId]: rows }));
+                  }
                 }, "Checked out");
               }}
             >

@@ -36,7 +36,13 @@ if (!token) {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const kidsSqlPath = join(__dirname, "../supabase/sql/01_victory_kids_tables.sql");
+const sqlDir = join(__dirname, "../supabase/sql");
+const kidsSqlFiles = [
+  "01_victory_kids_tables.sql",
+  "02_staff_pin_remarks.sql",
+  "03_children_nickname.sql",
+  "04_sessions_service_metadata.sql",
+];
 
 async function api(method, path, body) {
   const res = await fetch(`${API}${path}`, {
@@ -106,10 +112,12 @@ async function main() {
   }
 
   // 4) Add Victory Kids tables into the tenant schema (does not touch iosifin)
-  const kidsSql = readFileSync(kidsSqlPath, "utf8");
-  console.log("Applying Victory Kids tables SQL...");
-  await query(kidsSql);
-  console.log("Victory Kids tables applied.");
+  for (const file of kidsSqlFiles) {
+    const sql = readFileSync(join(sqlDir, file), "utf8");
+    console.log(`Applying ${file}...`);
+    await query(sql);
+    console.log(`${file} applied.`);
+  }
 
   // 5) Verify isolation markers
   const tables = await query(`

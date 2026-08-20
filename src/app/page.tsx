@@ -10,6 +10,7 @@ export default async function HomePage() {
     <StaffPinGate>
       <KidsChurchPool
         session={data.session}
+        openSessions={data.openSessions}
         active={data.active}
         configError={data.configError}
         dataSource={data.dataSource}

@@ -31,11 +31,18 @@ type Mode = "search" | "register";
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  sessionId: string;
   active: AttendanceWithChild[];
   onRegistered?: () => void;
 };
 
-export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props) {
+export function CheckInModal({
+  open,
+  onOpenChange,
+  sessionId,
+  active,
+  onRegistered,
+}: Props) {
   const [mode, setMode] = useState<Mode>("search");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ChildWithParent[]>([]);
@@ -153,7 +160,7 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
                           className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b] sm:w-auto"
                           onClick={() =>
                             run(async () => {
-                              await checkInAction(child.id);
+                              await checkInAction(child.id, sessionId);
                               handleOpenChange(false);
                               onRegistered?.();
                             }, `${child.firstName} checked in`)
@@ -208,6 +215,7 @@ export function CheckInModal({ open, onOpenChange, active, onRegistered }: Props
                     homeService: kid.homeService || DEFAULT_HOME_SERVICE,
                   })),
                   checkInNow,
+                  sessionId,
                 });
                 if (!result.ok) {
                   throw new Error(result.error);
