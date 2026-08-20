@@ -129,3 +129,54 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Receipt printing fallback, used when no Bluetooth printer is reachable
+ * (notably iPad Safari, which has no Web Bluetooth). The kiosk marks the slip
+ * it wants on paper with data-print-target; everything else is hidden and the
+ * slip is promoted to the top-left of the page so it lands on the roll.
+ */
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  html,
+  body {
+    background: #fff;
+    margin: 0;
+    padding: 0;
+  }
+
+  /*
+   * visibility rather than display, so the slip can opt back in even though
+   * every one of its ancestors is hidden.
+   */
+  body:has([data-print-target]) * {
+    visibility: hidden;
+  }
+
+  [data-print-target],
+  [data-print-target] * {
+    visibility: visible;
+  }
+
+  [data-print-target] {
+    position: fixed;
+    inset: 0 auto auto 0;
+    z-index: 9999;
+    margin: 0;
+    padding: 0;
+    background: #fff;
+  }
+
+  [data-print-target] [data-receipt-slip] {
+    box-shadow: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  [data-print-hidden] {
+    display: none !important;
+  }
+}

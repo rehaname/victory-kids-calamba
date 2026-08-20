@@ -25,11 +25,11 @@ export async function printReceipt(
   const settings = readPrinterSettings();
 
   if (!isBluetoothSupported()) {
-    systemPrint();
+    await systemPrint();
     return { via: "system", reason: "This browser cannot reach Bluetooth printers." };
   }
   if (!settings.deviceId) {
-    systemPrint();
+    await systemPrint();
     return { via: "system", reason: "No Bluetooth printer is set up yet." };
   }
 
@@ -43,7 +43,7 @@ export async function printReceipt(
     await printBytes(bytes, settings.deviceId);
     return { via: "bluetooth" };
   } catch (err) {
-    systemPrint();
+    await systemPrint();
     return {
       via: "system",
       reason:
@@ -67,8 +67,23 @@ export async function printTestSlip(): Promise<void> {
   );
 }
 
-export function systemPrint(): void {
+/**
+ * Awaits a paint before opening the dialog, so a slip that was only just added
+ * to the DOM is actually on screen for the browser to capture. Resolves once
+ * the dialog has been dismissed, which keeps callers from tearing the slip down
+ * too early.
+ */
+export async function systemPrint(): Promise<void> {
   if (typeof window === "undefined") return;
-  // Let the receipt paint before the dialog freezes the page.
-  window.requestAnimationFrame(() => window.print());
+  await nextPaint();
+  window.print();
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    // Two frames: the first runs before the pending paint, the second after it.
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() => resolve()),
+    );
+  });
 }

@@ -19,17 +19,22 @@ export const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   paperWidth: DEFAULT_PAPER_WIDTH,
 };
 
-export function readPrinterSettings(): PrinterSettings {
-  if (typeof window === "undefined") return DEFAULT_PRINTER_SETTINGS;
+/**
+ * Cached so useSyncExternalStore gets a stable object identity between reads;
+ * returning a fresh object every time would loop the render.
+ */
+let snapshot: PrinterSettings | null = null;
+const listeners = new Set<() => void>();
+
+function parse(raw: string | null): PrinterSettings {
+  if (!raw) return DEFAULT_PRINTER_SETTINGS;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_PRINTER_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<PrinterSettings>;
+    const value = JSON.parse(raw) as Partial<PrinterSettings>;
     return {
-      deviceId: typeof parsed.deviceId === "string" ? parsed.deviceId : null,
-      deviceName: typeof parsed.deviceName === "string" ? parsed.deviceName : null,
-      paperWidth: isPaperWidth(parsed.paperWidth)
-        ? parsed.paperWidth
+      deviceId: typeof value.deviceId === "string" ? value.deviceId : null,
+      deviceName: typeof value.deviceName === "string" ? value.deviceName : null,
+      paperWidth: isPaperWidth(value.paperWidth)
+        ? value.paperWidth
         : DEFAULT_PAPER_WIDTH,
     };
   } catch {
@@ -37,13 +42,46 @@ export function readPrinterSettings(): PrinterSettings {
   }
 }
 
-export function writePrinterSettings(settings: PrinterSettings): void {
-  if (typeof window === "undefined") return;
+export function readPrinterSettings(): PrinterSettings {
+  if (typeof window === "undefined") return DEFAULT_PRINTER_SETTINGS;
+  if (snapshot) return snapshot;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    snapshot = parse(window.localStorage.getItem(STORAGE_KEY));
   } catch {
-    // Private browsing or a full quota: the kiosk still prints, it just forgets.
+    snapshot = DEFAULT_PRINTER_SETTINGS;
   }
+  return snapshot;
+}
+
+export function writePrinterSettings(settings: PrinterSettings): void {
+  snapshot = settings;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Private browsing or a full quota: the kiosk still prints, it just forgets.
+    }
+  }
+  for (const listener of listeners) listener();
+}
+
+export function subscribePrinterSettings(listener: () => void): () => void {
+  listeners.add(listener);
+  // Another tab on the same kiosk may repoint the printer.
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== STORAGE_KEY) return;
+    snapshot = parse(event.newValue);
+    for (const l of listeners) l();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+export function getServerPrinterSettings(): PrinterSettings {
+  return DEFAULT_PRINTER_SETTINGS;
 }
 
 export function clearPairedPrinter(): PrinterSettings {
