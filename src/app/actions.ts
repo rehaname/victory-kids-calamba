@@ -10,12 +10,19 @@ import {
   normalizePin,
   staffPinConfigured,
 } from "@/lib/staff-pin";
+import { buildReceipt } from "@/lib/receipt";
 import { createPublicAdminClient } from "@/lib/supabase/public-admin";
 import { TENANT } from "@/lib/tenant";
-import type { AttendanceWithChild, RegisterInput, Session } from "@/lib/types";
+import type {
+  AttendanceWithChild,
+  Receipt,
+  RegisterInput,
+  Session,
+} from "@/lib/types";
 
 function refreshPool() {
   revalidatePath("/");
+  revalidatePath("/kiosk");
 }
 
 function refreshHistory() {
@@ -119,15 +126,24 @@ export async function verifyStaffPinAction(pinInput: string) {
   return { ok: true as const };
 }
 
-export async function startSessionAction() {
+export async function startSessionAction(serviceTime?: string) {
   try {
     const repo = getRepository();
-    await repo.startSession();
+    const session = await repo.startSession({ serviceTime: serviceTime ?? "" });
     refreshPool();
     refreshHistory();
-    return { ok: true as const };
+    return { ok: true as const, session };
   } catch (err) {
     return { ok: false as const, error: errorMessage(err, "Could not start session.") };
+  }
+}
+
+export async function listOpenSessionsAction(): Promise<Session[]> {
+  try {
+    return await getRepository().listOpenSessions();
+  } catch (err) {
+    console.error("listOpenSessionsAction failed:", errorMessage(err));
+    return [];
   }
 }
 
@@ -206,10 +222,13 @@ export async function registerFamilyAction(input: RegisterInput) {
   }
 }
 
-export async function checkInAction(childId: string) {
+export async function checkInAction(childId: string, sessionId?: string) {
   const repo = getRepository();
-  const session = await repo.getOpenSession();
+  const session = sessionId
+    ? await repo.getSession(sessionId)
+    : await repo.getOpenSession();
   if (!session) throw new Error("Start a session before checking in");
+  if (session.status !== "open") throw new Error("That session is already closed");
   await repo.checkIn(session.id, childId);
   refreshPool();
 }
@@ -221,4 +240,157 @@ export async function checkOutAction(attendanceId: string, claimantName: string)
 
 export async function getSessionHistoryAction(sessionId: string) {
   return getRepository().listAttendanceForSession(sessionId);
+}
+
+/* ---------------------------------------------------------------- kiosk --- */
+
+export type KioskState = {
+  /** Open sessions, newest first. Empty until staff starts one. */
+  openSessions: Session[];
+  /** The session the kiosk should check kids into, or null when none is open. */
+  activeSession: Session | null;
+  configError: string | null;
+};
+
+/**
+ * The kiosk asks for its own state on load and after every settings change.
+ * `preferredSessionId` is the session this device last selected; it is honoured
+ * only while that session is still open.
+ */
+export async function kioskStateAction(
+  preferredSessionId?: string | null,
+): Promise<KioskState> {
+  const diagnostics = diagnoseDataSource();
+  try {
+    resolveDataSource();
+    const openSessions = await getRepository().listOpenSessions();
+    const preferred = preferredSessionId
+      ? openSessions.find((s) => s.id === preferredSessionId)
+      : undefined;
+    return {
+      openSessions,
+      activeSession: preferred ?? openSessions[0] ?? null,
+      configError: diagnostics.message,
+    };
+  } catch (err) {
+    const message = errorMessage(err);
+    console.error("kioskStateAction failed:", message);
+    return {
+      openSessions: [],
+      activeSession: null,
+      configError: diagnostics.message || message,
+    };
+  }
+}
+
+export type KioskRegisterResult =
+  | { ok: true; children: Array<{ id: string; firstName: string; nickname: string }> }
+  | { ok: false; error: string };
+
+/**
+ * Saves the family and hands back the new child ids so the kiosk can offer to
+ * check them in without a second lookup. Never checks in on its own — the
+ * kiosk asks the parent first.
+ */
+export async function kioskRegisterAction(
+  input: RegisterInput,
+): Promise<KioskRegisterResult> {
+  try {
+    resolveDataSource();
+
+    if (!input.parent.fullName.trim()) {
+      return { ok: false, error: "Parent name is required." };
+    }
+    if (!input.children.length) {
+      return { ok: false, error: "Add at least one child." };
+    }
+    for (const child of input.children) {
+      if (!child.firstName.trim() || !child.lastName.trim()) {
+        return { ok: false, error: "Each child needs a first and last name." };
+      }
+      if (!child.birthday) {
+        return { ok: false, error: "Each child needs a birthday." };
+      }
+    }
+
+    const { children } = await getRepository().registerFamily({
+      ...input,
+      checkInNow: false,
+    });
+    refreshChildren();
+    return {
+      ok: true,
+      children: children.map((c) => ({
+        id: c.id,
+        firstName: c.firstName,
+        nickname: c.nickname,
+      })),
+    };
+  } catch (err) {
+    console.error("kioskRegisterAction failed:", errorMessage(err));
+    return { ok: false, error: errorMessage(err, "Could not save registration.") };
+  }
+}
+
+export type KioskCheckInResult =
+  | { ok: true; receipt: Receipt }
+  | { ok: false; error: string };
+
+/** Checks a child in and returns the slip to print, in one round trip. */
+export async function kioskCheckInAction(
+  sessionId: string,
+  childId: string,
+): Promise<KioskCheckInResult> {
+  try {
+    const repo = getRepository();
+    const session = await repo.getSession(sessionId);
+    if (!session) {
+      return { ok: false, error: "That session no longer exists." };
+    }
+    if (session.status !== "open") {
+      return { ok: false, error: "That session has been closed. Ask a volunteer." };
+    }
+
+    const attendance = await repo.checkIn(sessionId, childId);
+    const hydrated = await repo.getAttendance(attendance.id);
+    if (!hydrated) {
+      return { ok: false, error: "Checked in, but the receipt could not be built." };
+    }
+
+    refreshPool();
+    refreshHistory();
+    return { ok: true, receipt: buildReceipt(hydrated, session) };
+  } catch (err) {
+    console.error("kioskCheckInAction failed:", errorMessage(err));
+    return { ok: false, error: errorMessage(err, "Could not check in.") };
+  }
+}
+
+/** Currently checked-in kids for the settings roster, newest arrival last. */
+export async function getSessionRosterAction(
+  sessionId: string,
+): Promise<AttendanceWithChild[]> {
+  try {
+    return await getRepository().listActiveAttendance(sessionId);
+  } catch (err) {
+    console.error("getSessionRosterAction failed:", errorMessage(err));
+    return [];
+  }
+}
+
+/** Rebuilds a slip for reprinting from the settings roster. */
+export async function getReceiptAction(
+  attendanceId: string,
+): Promise<Receipt | null> {
+  try {
+    const repo = getRepository();
+    const attendance = await repo.getAttendance(attendanceId);
+    if (!attendance) return null;
+    const session = await repo.getSession(attendance.sessionId);
+    if (!session) return null;
+    return buildReceipt(attendance, session);
+  } catch (err) {
+    console.error("getReceiptAction failed:", errorMessage(err));
+    return null;
+  }
 }

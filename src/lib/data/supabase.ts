@@ -1,6 +1,11 @@
 import { assertEligibleAge, getAgePool } from "@/lib/age";
 import type { KidsRepository } from "@/lib/data/repository";
 import { toError } from "@/lib/errors";
+import {
+  defaultSessionName,
+  manilaDate,
+  normalizeServiceTime,
+} from "@/lib/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Attendance,
@@ -10,10 +15,16 @@ import type {
   Parent,
   RegisterInput,
   Session,
+  StartSessionInput,
 } from "@/lib/types";
 
 function throwDb(error: unknown, fallback: string): never {
   throw toError(error, fallback);
+}
+
+/** Postgres unique_violation, surfaced by PostgREST as code 23505. */
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "23505";
 }
 
 type ParentRow = {
@@ -41,6 +52,9 @@ type SessionRow = {
   started_at: string;
   ended_at: string | null;
   status: "open" | "closed";
+  name: string | null;
+  service_time: string | null;
+  session_date: string | null;
 };
 
 type AttendanceRow = {
@@ -87,6 +101,9 @@ function mapSession(row: SessionRow): Session {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     status: row.status,
+    name: row.name?.trim() || "",
+    serviceTime: normalizeServiceTime(row.service_time),
+    sessionDate: row.session_date || manilaDate(new Date(row.started_at)),
   };
 }
 
@@ -122,12 +139,37 @@ function db() {
 export const supabaseRepository: KidsRepository = {
   async getOpenSession() {
     const supabase = db();
+    // Several services can be open at once; the newest is the sensible default.
     const { data, error } = await supabase
       .from("sessions")
       .select("*")
       .eq("status", "open")
+      .order("started_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
     if (error) throwDb(error, "Could not load open session");
+    return data ? mapSession(data as SessionRow) : null;
+  },
+
+  async listOpenSessions() {
+    const supabase = db();
+    const { data, error } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("status", "open")
+      .order("started_at", { ascending: false });
+    if (error) throwDb(error, "Could not load open sessions");
+    return ((data ?? []) as SessionRow[]).map(mapSession);
+  },
+
+  async getSession(sessionId) {
+    const supabase = db();
+    const { data, error } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .maybeSingle();
+    if (error) throwDb(error, "Could not load session");
     return data ? mapSession(data as SessionRow) : null;
   },
 
@@ -141,14 +183,31 @@ export const supabaseRepository: KidsRepository = {
     return ((data ?? []) as SessionRow[]).map(mapSession);
   },
 
-  async startSession() {
+  async startSession(input?: StartSessionInput) {
     const supabase = db();
+    const startedAt = new Date();
+    const serviceTime = normalizeServiceTime(input?.serviceTime);
     const { data, error } = await supabase
       .from("sessions")
-      .insert({ status: "open" })
+      .insert({
+        status: "open",
+        service_time: serviceTime,
+        name: input?.name?.trim() || defaultSessionName(serviceTime, startedAt),
+        session_date: manilaDate(startedAt),
+      })
       .select("*")
       .single();
-    if (error) throwDb(error, "Could not start session");
+    if (error) {
+      // Partial unique index sessions_one_open_per_service_idx.
+      if (isUniqueViolation(error)) {
+        throw new Error(
+          serviceTime
+            ? `The ${serviceTime.toUpperCase()} service already has an open session today.`
+            : "A session is already open. Pick a service time to start another.",
+        );
+      }
+      throwDb(error, "Could not start session");
+    }
     return mapSession(data as SessionRow);
   },
 
@@ -254,6 +313,17 @@ export const supabaseRepository: KidsRepository = {
       .filter((row): row is AttendanceWithChild => row !== null);
   },
 
+  async getAttendance(attendanceId) {
+    const supabase = db();
+    const { data, error } = await supabase
+      .from("attendance")
+      .select("*, children(*, parents(*))")
+      .eq("id", attendanceId)
+      .maybeSingle();
+    if (error) throwDb(error, "Could not load check-in");
+    return data ? mapAttendance(data as AttendanceRow) : null;
+  },
+
   async checkIn(sessionId, childId) {
     const supabase = db();
     const { data: childRow, error: childError } = await supabase
@@ -269,7 +339,12 @@ export const supabaseRepository: KidsRepository = {
       .insert({ session_id: sessionId, child_id: childId })
       .select("*")
       .single();
-    if (error) throwDb(error, "Could not check in child");
+    if (error) {
+      if (isUniqueViolation(error)) {
+        throw new Error("That child is already checked in for this session.");
+      }
+      throwDb(error, "Could not check in child");
+    }
     const row = data as AttendanceRow;
     return {
       id: row.id,
