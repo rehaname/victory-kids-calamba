@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "provision:tenant": "node scripts/provision-tenant.mjs",
-    "test": "node --import tsx --test src/lib/age.test.ts src/lib/staff-pin.test.ts src/lib/csv.test.ts"
+    "test": "node --import tsx --test src/lib/age.test.ts src/lib/staff-pin.test.ts src/lib/csv.test.ts src/lib/kiosk-search.test.ts src/lib/session.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",

@@ -1,5 +1,10 @@
 import { assertEligibleAge, getAgePool } from "@/lib/age";
 import type { KidsRepository } from "@/lib/data/repository";
+import {
+  defaultSessionName,
+  manilaDate,
+  requireServiceTime,
+} from "@/lib/session";
 import type {
   Attendance,
   AttendanceWithChild,
@@ -8,6 +13,7 @@ import type {
   Parent,
   RegisterInput,
   Session,
+  StartSessionInput,
 } from "@/lib/types";
 
 function id() {
@@ -60,7 +66,18 @@ function withChild(row: Attendance): AttendanceWithChild | null {
 
 export const memoryRepository: KidsRepository = {
   async getOpenSession() {
-    return store().sessions.find((s) => s.status === "open") ?? null;
+    const [newest] = await this.listOpenSessions();
+    return newest ?? null;
+  },
+
+  async listOpenSessions() {
+    return store()
+      .sessions.filter((s) => s.status === "open")
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  },
+
+  async getSession(sessionId) {
+    return store().sessions.find((s) => s.id === sessionId) ?? null;
   },
 
   async listSessions() {
@@ -69,15 +86,32 @@ export const memoryRepository: KidsRepository = {
     );
   },
 
-  async startSession() {
-    if (store().sessions.some((s) => s.status === "open")) {
-      throw new Error("A session is already open");
+  async startSession(input?: StartSessionInput) {
+    const startedAt = new Date();
+    const serviceTime = requireServiceTime(input?.serviceTime);
+    const sessionDate = manilaDate(startedAt);
+
+    // Mirrors sessions_one_open_per_service_idx in Postgres.
+    const clash = store().sessions.find(
+      (s) =>
+        s.status === "open" &&
+        s.sessionDate === sessionDate &&
+        s.serviceTime === serviceTime,
+    );
+    if (clash) {
+      throw new Error(
+        `The ${serviceTime.toUpperCase()} service already has an open session today.`,
+      );
     }
+
     const session: Session = {
       id: id(),
-      startedAt: now(),
+      startedAt: startedAt.toISOString(),
       endedAt: null,
       status: "open",
+      name: input?.name?.trim() || defaultSessionName(serviceTime, startedAt),
+      serviceTime,
+      sessionDate,
     };
     store().sessions.unshift(session);
     return session;
@@ -157,6 +191,11 @@ export const memoryRepository: KidsRepository = {
       .map(withChild)
       .filter((row): row is AttendanceWithChild => row !== null)
       .sort((a, b) => a.timeIn.localeCompare(b.timeIn));
+  },
+
+  async getAttendance(attendanceId) {
+    const row = store().attendance.find((a) => a.id === attendanceId);
+    return row ? withChild(row) : null;
   },
 
   async checkIn(sessionId, childId) {

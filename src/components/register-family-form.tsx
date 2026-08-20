@@ -150,7 +150,10 @@ export function RegisterFamilyForm({
                   )}
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor={`home-service-${index}`}>Home Service</Label>
+                  <Label htmlFor={`home-service-${index}`}>Usual Sunday service</Label>
+                  <p className="text-xs text-black/45">
+                    The service this family normally attends — not today&rsquo;s Kids Church session.
+                  </p>
                   <select
                     id={`home-service-${index}`}
                     required

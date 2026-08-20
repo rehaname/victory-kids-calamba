@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getSessionHistoryAction } from "@/app/actions";
 import {
@@ -26,25 +26,31 @@ type Props = {
 
 export function HistoryModule({ sessions }: Props) {
   const [historySessionId, setHistorySessionId] = useState(sessions[0]?.id ?? "");
-  const [historyRows, setHistoryRows] = useState<AttendanceWithChild[]>([]);
-  const [pending, startTransition] = useTransition();
+  /** Tagged with the session it belongs to, so a switch never shows stale rows. */
+  const [loaded, setLoaded] = useState<{
+    sessionId: string;
+    rows: AttendanceWithChild[];
+  } | null>(null);
 
-  function loadHistory(sessionId: string) {
-    setHistorySessionId(sessionId);
-    startTransition(async () => {
-      try {
-        const rows = await getSessionHistoryAction(sessionId);
-        setHistoryRows(rows);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not load history");
-      }
-    });
-  }
+  const historyRows = loaded?.sessionId === historySessionId ? loaded.rows : [];
+  const pending = Boolean(historySessionId) && loaded?.sessionId !== historySessionId;
 
   useEffect(() => {
-    if (sessions[0]) loadHistory(sessions[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions[0]?.id]);
+    if (!historySessionId) return;
+    let cancelled = false;
+    getSessionHistoryAction(historySessionId)
+      .then((rows) => {
+        if (!cancelled) setLoaded({ sessionId: historySessionId, rows });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoaded({ sessionId: historySessionId, rows: [] });
+        toast.error(err instanceof Error ? err.message : "Could not load history");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [historySessionId]);
 
   function exportSession() {
     const selected = sessions.find((s) => s.id === historySessionId);
@@ -90,7 +96,7 @@ export function HistoryModule({ sessions }: Props) {
             className="h-14 w-full rounded-md border border-black/15 bg-white px-3 text-base"
             value={historySessionId}
             disabled={pending}
-            onChange={(e) => loadHistory(e.target.value)}
+            onChange={(e) => setHistorySessionId(e.target.value)}
           >
             {sessions.length === 0 && <option value="">No sessions yet</option>}
             {sessions.map((s) => (
