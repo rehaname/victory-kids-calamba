@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { getSessionHistoryAction } from "@/app/actions";
 import {
   formatBirthdayMdY,
-  formatSessionLabel,
   formatTime,
   getAge,
 } from "@/lib/age";
@@ -15,6 +14,7 @@ import {
   SESSION_EXPORT_HEADERS,
   sessionExportCells,
 } from "@/lib/csv";
+import { sessionDisplayName } from "@/lib/session";
 import type { AttendanceWithChild, Session } from "@/lib/types";
 import { KioskHeader } from "@/components/kiosk-header";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,7 @@ export function HistoryModule({ sessions }: Props) {
   function exportSession() {
     const selected = sessions.find((s) => s.id === historySessionId);
     const stamp = selected
-      ? formatSessionLabel(selected.startedAt).replace(/[^a-zA-Z0-9]+/g, "-")
+      ? sessionDisplayName(selected).replace(/[^a-zA-Z0-9]+/g, "-")
       : historySessionId;
     downloadCsv(
       `kids-church-session-${stamp}.csv`,
@@ -101,7 +101,7 @@ export function HistoryModule({ sessions }: Props) {
             {sessions.length === 0 && <option value="">No sessions yet</option>}
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>
-                {formatSessionLabel(s.startedAt)} · {s.status}
+                {sessionDisplayName(s)} · {s.status}
               </option>
             ))}
           </select>

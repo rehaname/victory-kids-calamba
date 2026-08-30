@@ -31,6 +31,11 @@ export type Session = {
   status: SessionStatus;
   /** Readable label shown on receipts and in the session picker. */
   name: string;
+  /**
+   * Free-text site where this tablet/kiosk is running (e.g. Halang, Bayan).
+   * Stored as entered; the sanitized form is baked into `name`.
+   */
+  location: string;
   /** One of SERVICE_TIMES, or "" for sessions started before service times existed. */
   serviceTime: string;
   /** Manila-local date the session belongs to (YYYY-MM-DD). */
@@ -39,6 +44,8 @@ export type Session = {
 
 export type StartSessionInput = {
   serviceTime: string;
+  /** Required free-text location (Halang, Bayan, …). */
+  location: string;
   name?: string;
 };
 

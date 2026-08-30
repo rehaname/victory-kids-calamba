@@ -12,7 +12,7 @@ import {
   staffPinConfigured,
 } from "@/lib/staff-pin";
 import { buildReceipt } from "@/lib/receipt";
-import { requireServiceTime } from "@/lib/session";
+import { requireLocation, requireServiceTime } from "@/lib/session";
 import { createPublicAdminClient } from "@/lib/supabase/public-admin";
 import { TENANT } from "@/lib/tenant";
 import type {
@@ -133,11 +133,12 @@ export async function verifyStaffPinAction(pinInput: string) {
   return { ok: true as const };
 }
 
-export async function startSessionAction(serviceTime: string) {
+export async function startSessionAction(serviceTime: string, location: string) {
   try {
     requireServiceTime(serviceTime);
+    requireLocation(location);
     const repo = getRepository();
-    const session = await repo.startSession({ serviceTime });
+    const session = await repo.startSession({ serviceTime, location });
     refreshPool();
     refreshHistory();
     return { ok: true as const, session };

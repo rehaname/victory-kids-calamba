@@ -94,10 +94,11 @@ export function KioskHeader({
                 {openSessions.length > 1 && onSelectSession ? (
                   <select
                     aria-label="Live session"
-                    className="h-14 rounded-xl border border-black/15 bg-white px-3 text-sm font-medium"
+                    className="h-14 max-w-[min(100%,20rem)] rounded-xl border border-black/15 bg-white px-3 text-sm font-medium"
                     value={session.id}
                     disabled={pending}
                     onChange={(e) => onSelectSession(e.target.value)}
+                    title={sessionDisplayName(session)}
                   >
                     {openSessions.map((open) => (
                       <option key={open.id} value={open.id}>
@@ -106,7 +107,10 @@ export function KioskHeader({
                     ))}
                   </select>
                 ) : (
-                  <Badge className="bg-[#003B8E] px-3 py-1.5 text-sm text-white hover:bg-[#003B8E]">
+                  <Badge
+                    className="max-w-[min(100%,20rem)] truncate bg-[#003B8E] px-3 py-1.5 text-sm text-white hover:bg-[#003B8E]"
+                    title={sessionDisplayName(session)}
+                  >
                     {sessionDisplayName(session)}
                     {extraOpen > 0 ? ` · +${extraOpen} more` : " · open"}
                   </Badge>

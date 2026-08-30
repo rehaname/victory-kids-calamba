@@ -3,6 +3,7 @@ import type { KidsRepository } from "@/lib/data/repository";
 import {
   defaultSessionName,
   manilaDate,
+  requireLocation,
   requireServiceTime,
 } from "@/lib/session";
 import type {
@@ -89,27 +90,20 @@ export const memoryRepository: KidsRepository = {
   async startSession(input?: StartSessionInput) {
     const startedAt = new Date();
     const serviceTime = requireServiceTime(input?.serviceTime);
+    const location = requireLocation(input?.location);
     const sessionDate = manilaDate(startedAt);
 
-    // Mirrors sessions_one_open_per_service_idx in Postgres.
-    const clash = store().sessions.find(
-      (s) =>
-        s.status === "open" &&
-        s.sessionDate === sessionDate &&
-        s.serviceTime === serviceTime,
-    );
-    if (clash) {
-      throw new Error(
-        `The ${serviceTime.toUpperCase()} service already has an open session today.`,
-      );
-    }
-
+    // Always create a new open session — multiple tablets / locations can run
+    // the same service hour (and even consecutive Starts at one site).
     const session: Session = {
       id: id(),
       startedAt: startedAt.toISOString(),
       endedAt: null,
       status: "open",
-      name: input?.name?.trim() || defaultSessionName(serviceTime, startedAt),
+      name:
+        input?.name?.trim() ||
+        defaultSessionName(location, serviceTime, startedAt),
+      location,
       serviceTime,
       sessionDate,
     };

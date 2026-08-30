@@ -5,9 +5,10 @@ let loaded = false;
 const listeners = new Set<() => void>();
 
 /**
- * Which session this particular kiosk device checks kids into. Device-local on
- * purpose: two tablets can serve two concurrent services. The value is only
- * honoured while that session is still open.
+ * Which session this particular device (staff pool or kiosk) checks kids into.
+ * Device-local on purpose: two tablets can serve two concurrent sessions
+ * (e.g. Halang 9AM and Bayan 9AM). The value is only honoured while that
+ * session is still open.
  */
 export function readSelectedSessionId(): string | null {
   if (typeof window === "undefined") return null;

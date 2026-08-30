@@ -42,6 +42,7 @@ const kidsSqlFiles = [
   "02_staff_pin_remarks.sql",
   "03_children_nickname.sql",
   "04_sessions_service_metadata.sql",
+  "05_sessions_location.sql",
 ];
 
 async function api(method, path, body) {
