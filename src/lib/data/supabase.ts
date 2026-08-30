@@ -5,6 +5,7 @@ import {
   defaultSessionName,
   manilaDate,
   normalizeServiceTime,
+  requireLocation,
   requireServiceTime,
 } from "@/lib/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -54,6 +55,7 @@ type SessionRow = {
   ended_at: string | null;
   status: "open" | "closed";
   name: string | null;
+  location: string | null;
   service_time: string | null;
   session_date: string | null;
 };
@@ -103,6 +105,7 @@ function mapSession(row: SessionRow): Session {
     endedAt: row.ended_at,
     status: row.status,
     name: row.name?.trim() || "",
+    location: row.location?.trim() || "",
     serviceTime: normalizeServiceTime(row.service_time),
     sessionDate: row.session_date || manilaDate(new Date(row.started_at)),
   };
@@ -188,25 +191,21 @@ export const supabaseRepository: KidsRepository = {
     const supabase = db();
     const startedAt = new Date();
     const serviceTime = requireServiceTime(input?.serviceTime);
+    const location = requireLocation(input?.location);
     const { data, error } = await supabase
       .from("sessions")
       .insert({
         status: "open",
+        location,
         service_time: serviceTime,
-        name: input?.name?.trim() || defaultSessionName(serviceTime, startedAt),
+        name:
+          input?.name?.trim() ||
+          defaultSessionName(location, serviceTime, startedAt),
         session_date: manilaDate(startedAt),
       })
       .select("*")
       .single();
-    if (error) {
-      // Partial unique index sessions_one_open_per_service_idx.
-      if (isUniqueViolation(error)) {
-        throw new Error(
-          `The ${serviceTime.toUpperCase()} service already has an open session today.`,
-        );
-      }
-      throwDb(error, "Could not start session");
-    }
+    if (error) throwDb(error, "Could not start session");
     return mapSession(data as SessionRow);
   },
 

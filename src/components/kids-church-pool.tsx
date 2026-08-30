@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import { toast } from "sonner";
 import {
   checkOutAction,
@@ -17,6 +17,12 @@ import {
   getAgePool,
   sortByAgeThenName,
 } from "@/lib/age";
+import {
+  getServerSelectedSessionId,
+  readSelectedSessionId,
+  subscribeSelectedSessionId,
+  writeSelectedSessionId,
+} from "@/lib/kiosk-session";
 import { sessionDisplayName } from "@/lib/session";
 import type { AgePool, AttendanceWithChild, Session } from "@/lib/types";
 import { CheckInModal } from "@/components/check-in-modal";
@@ -56,7 +62,11 @@ export function KidsChurchPool({
   const [pending, startTransition] = useTransition();
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
-  const [pickedId, setPickedId] = useState<string | null>(null);
+  const pickedId = useSyncExternalStore(
+    subscribeSelectedSessionId,
+    readSelectedSessionId,
+    getServerSelectedSessionId,
+  );
   const [rowsBySession, setRowsBySession] = useState<Record<string, AttendanceWithChild[]>>(
     () => (initialSession ? { [initialSession.id]: initialActive } : {}),
   );
@@ -126,14 +136,15 @@ export function KidsChurchPool({
     setClaimantName("");
   }
 
-  function startSession(serviceTime: string) {
+  function startSession(serviceTime: string, location: string) {
     run(async () => {
-      const result = await startSessionAction(serviceTime);
+      const result = await startSessionAction(serviceTime, location);
       if (!result.ok) throw new Error(result.error);
-      setPickedId(result.session.id);
+      writeSelectedSessionId(result.session.id);
       setStartOpen(false);
       setCheckInOpen(true);
-    }, `${serviceTime.toUpperCase()} service started`);
+      toast.success(`${sessionDisplayName(result.session)} started`);
+    });
   }
 
   return (
@@ -145,14 +156,14 @@ export function KidsChurchPool({
         openSessions={initialOpenSessions}
         showSessionControls
         pending={pending}
-        onSelectSession={setPickedId}
+        onSelectSession={writeSelectedSessionId}
         onStartSession={() => setStartOpen(true)}
         onCloseSession={() =>
           selected &&
           run(async () => {
             const result = await closeSessionAction(selected.id);
             if (!result.ok) throw new Error(result.error);
-            setPickedId(null);
+            if (pickedId === selected.id) writeSelectedSessionId(null);
           }, "Session closed")
         }
       />
@@ -240,7 +251,6 @@ export function KidsChurchPool({
       <StartSessionDialog
         open={startOpen}
         onOpenChange={setStartOpen}
-        liveServiceTimes={initialOpenSessions.map((s) => s.serviceTime).filter(Boolean)}
         pending={pending}
         onStart={startSession}
       />
