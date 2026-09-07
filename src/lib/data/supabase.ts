@@ -1,4 +1,8 @@
 import { assertEligibleAge, getAgePool } from "@/lib/age";
+import {
+  findLikelyDuplicates,
+  type ChildIdentity,
+} from "@/lib/child-duplicates";
 import type { KidsRepository } from "@/lib/data/repository";
 import { toError } from "@/lib/errors";
 import {
@@ -14,6 +18,7 @@ import type {
   AttendanceWithChild,
   Child,
   ChildWithParent,
+  DuplicateChildMatch,
   Parent,
   RegisterInput,
   Session,
@@ -46,6 +51,7 @@ type ChildRow = {
   birthday: string;
   home_service: string;
   created_at: string;
+  deleted_at?: string | null;
   parents?: ParentRow | ParentRow[] | null;
 };
 
@@ -94,6 +100,7 @@ function mapChild(row: ChildRow, parent?: Parent): ChildWithParent {
     birthday: row.birthday,
     homeService: row.home_service,
     createdAt: row.created_at,
+    deletedAt: row.deleted_at ?? null,
     parent: resolved,
   };
 }
@@ -227,6 +234,7 @@ export const supabaseRepository: KidsRepository = {
     let req = supabase
       .from("children")
       .select("*, parents(*)")
+      .is("deleted_at", null)
       .order("last_name")
       .order("first_name");
 
@@ -253,6 +261,72 @@ export const supabaseRepository: KidsRepository = {
 
   async listChildren() {
     return this.searchChildren("");
+  },
+
+  async softDeleteChild(childId) {
+    const supabase = db();
+    const { data: childRow, error: childError } = await supabase
+      .from("children")
+      .select("id, deleted_at")
+      .eq("id", childId)
+      .maybeSingle();
+    if (childError) throwDb(childError, "Could not load child");
+    if (!childRow) throw new Error("Child not found");
+    if ((childRow as { deleted_at: string | null }).deleted_at) {
+      throw new Error("That child is already removed from the roster.");
+    }
+
+    const { data: active, error: activeError } = await supabase
+      .from("attendance")
+      .select("id")
+      .eq("child_id", childId)
+      .is("time_out", null)
+      .limit(1);
+    if (activeError) throwDb(activeError, "Could not check attendance");
+    if (active && active.length > 0) {
+      throw new Error("Check out first before removing this child from the roster.");
+    }
+
+    const { error: updateError } = await supabase
+      .from("children")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", childId)
+      .is("deleted_at", null);
+    if (updateError) throwDb(updateError, "Could not remove child from roster");
+  },
+
+  async findLikelyDuplicates(children: ChildIdentity[]) {
+    if (!children.length) return [];
+
+    const birthdays = [...new Set(children.map((c) => c.birthday).filter(Boolean))];
+    if (!birthdays.length) return [];
+
+    const supabase = db();
+    const { data, error } = await supabase
+      .from("children")
+      .select("*, parents(*)")
+      .is("deleted_at", null)
+      .in("birthday", birthdays);
+    if (error) throwDb(error, "Could not check for duplicate children");
+
+    const existing = ((data ?? []) as ChildRow[]).map((row) => mapChild(row));
+    const hits = findLikelyDuplicates(children, existing);
+
+    const seen = new Set<string>();
+    const matches: DuplicateChildMatch[] = [];
+    for (const hit of hits) {
+      if (seen.has(hit.existing.id)) continue;
+      seen.add(hit.existing.id);
+      matches.push({
+        id: hit.existing.id,
+        firstName: hit.existing.firstName,
+        lastName: hit.existing.lastName,
+        nickname: hit.existing.nickname,
+        birthday: hit.existing.birthday,
+        parentName: hit.existing.parent.fullName,
+      });
+    }
+    return matches;
   },
 
   async registerFamily(input: RegisterInput) {
@@ -327,11 +401,15 @@ export const supabaseRepository: KidsRepository = {
     const supabase = db();
     const { data: childRow, error: childError } = await supabase
       .from("children")
-      .select("birthday")
+      .select("birthday, deleted_at")
       .eq("id", childId)
       .single();
     if (childError) throwDb(childError, "Could not load child");
-    assertEligibleAge((childRow as { birthday: string }).birthday);
+    const child = childRow as { birthday: string; deleted_at: string | null };
+    if (child.deleted_at) {
+      throw new Error("That child was removed from the roster.");
+    }
+    assertEligibleAge(child.birthday);
 
     const { data, error } = await supabase
       .from("attendance")

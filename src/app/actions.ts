@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { diagnoseDataSource, getRepository, resolveDataSource } from "@/lib/data";
+import { formatDuplicateBlockMessage } from "@/lib/child-duplicates";
 import { errorMessage } from "@/lib/errors";
 import { toKioskChildHit } from "@/lib/kiosk-search";
 import {
@@ -17,6 +18,7 @@ import { createPublicAdminClient } from "@/lib/supabase/public-admin";
 import { TENANT } from "@/lib/tenant";
 import type {
   AttendanceWithChild,
+  DuplicateChildMatch,
   KioskChildHit,
   Receipt,
   RegisterInput,
@@ -204,6 +206,47 @@ export async function listChildrenAction() {
   }
 }
 
+/**
+ * Soft-delete a child from the roster. Blocks if they are currently checked in.
+ * Does not delete attendance history or parent rows.
+ */
+export async function deleteChildAction(childId: string) {
+  try {
+    resolveDataSource();
+    if (!childId.trim()) {
+      return { ok: false as const, error: "Missing child id." };
+    }
+    await getRepository().softDeleteChild(childId);
+    refreshChildren();
+    refreshPool();
+    refreshHistory();
+    return { ok: true as const };
+  } catch (err) {
+    console.error("deleteChildAction failed:", errorMessage(err));
+    return {
+      ok: false as const,
+      error: errorMessage(err, "Could not remove child from roster."),
+    };
+  }
+}
+
+async function blockIfDuplicateChildren(input: RegisterInput) {
+  const duplicates = await getRepository().findLikelyDuplicates(input.children);
+  if (duplicates.length === 0) return null;
+  return {
+    ok: false as const,
+    error: formatDuplicateBlockMessage(
+      duplicates.map((d) => ({
+        childFirstName: d.firstName,
+        childLastName: d.lastName,
+        birthday: d.birthday,
+        parentName: d.parentName,
+      })),
+    ),
+    duplicates,
+  };
+}
+
 export async function registerFamilyAction(input: RegisterInput) {
   try {
     resolveDataSource();
@@ -222,6 +265,9 @@ export async function registerFamilyAction(input: RegisterInput) {
         return { ok: false as const, error: "Each child needs a birthday." };
       }
     }
+
+    const dup = await blockIfDuplicateChildren(input);
+    if (dup) return dup;
 
     const repo = getRepository();
     const result = await repo.registerFamily(input);
@@ -312,7 +358,7 @@ export async function kioskStateAction(
 
 export type KioskRegisterResult =
   | { ok: true; children: Array<{ id: string; firstName: string; nickname: string }> }
-  | { ok: false; error: string };
+  | { ok: false; error: string; duplicates?: DuplicateChildMatch[] };
 
 /**
  * Saves the family and hands back the new child ids so the kiosk can offer to
@@ -339,6 +385,9 @@ export async function kioskRegisterAction(
         return { ok: false, error: "Each child needs a birthday." };
       }
     }
+
+    const dup = await blockIfDuplicateChildren(input);
+    if (dup) return dup;
 
     const { children } = await getRepository().registerFamily({
       ...input,

@@ -1,4 +1,8 @@
 import { assertEligibleAge, getAgePool } from "@/lib/age";
+import {
+  findLikelyDuplicates,
+  type ChildIdentity,
+} from "@/lib/child-duplicates";
 import type { KidsRepository } from "@/lib/data/repository";
 import {
   defaultSessionName,
@@ -11,6 +15,7 @@ import type {
   AttendanceWithChild,
   Child,
   ChildWithParent,
+  DuplicateChildMatch,
   Parent,
   RegisterInput,
   Session,
@@ -55,6 +60,7 @@ function withParent(child: Child): ChildWithParent {
 function withChild(row: Attendance): AttendanceWithChild | null {
   const child = store().children.find((c) => c.id === row.childId);
   if (!child) throw new Error("Child not found");
+  // History still shows soft-deleted children by name.
   const enriched = withParent(child);
   const agePool = getAgePool(enriched.birthday);
   if (!agePool) return null;
@@ -63,6 +69,10 @@ function withChild(row: Attendance): AttendanceWithChild | null {
     child: enriched,
     agePool,
   };
+}
+
+function activeChildren(): Child[] {
+  return store().children.filter((c) => !c.deletedAt);
 }
 
 export const memoryRepository: KidsRepository = {
@@ -122,17 +132,15 @@ export const memoryRepository: KidsRepository = {
 
   async searchChildren(query) {
     const q = query.trim().toLowerCase();
+    const roster = activeChildren().map(withParent);
     if (!q) {
-      return store()
-        .children.map(withParent)
-        .sort((a, b) =>
-          `${a.lastName}${a.firstName}`.localeCompare(
-            `${b.lastName}${b.firstName}`,
-          ),
-        );
+      return roster.sort((a, b) =>
+        `${a.lastName}${a.firstName}`.localeCompare(
+          `${b.lastName}${b.firstName}`,
+        ),
+      );
     }
-    return store()
-      .children.map(withParent)
+    return roster
       .filter((c) => {
         const hay = `${c.firstName} ${c.lastName} ${c.nickname} ${c.parent.fullName}`.toLowerCase();
         return hay.includes(q);
@@ -146,6 +154,44 @@ export const memoryRepository: KidsRepository = {
 
   async listChildren() {
     return this.searchChildren("");
+  },
+
+  async softDeleteChild(childId) {
+    const child = store().children.find((c) => c.id === childId);
+    if (!child) throw new Error("Child not found");
+    if (child.deletedAt) {
+      throw new Error("That child is already removed from the roster.");
+    }
+
+    const active = store().attendance.find(
+      (a) => a.childId === childId && !a.timeOut,
+    );
+    if (active) {
+      throw new Error("Check out first before removing this child from the roster.");
+    }
+
+    child.deletedAt = now();
+  },
+
+  async findLikelyDuplicates(children: ChildIdentity[]) {
+    if (!children.length) return [];
+    const existing = activeChildren().map(withParent);
+    const hits = findLikelyDuplicates(children, existing);
+    const seen = new Set<string>();
+    const matches: DuplicateChildMatch[] = [];
+    for (const hit of hits) {
+      if (seen.has(hit.existing.id)) continue;
+      seen.add(hit.existing.id);
+      matches.push({
+        id: hit.existing.id,
+        firstName: hit.existing.firstName,
+        lastName: hit.existing.lastName,
+        nickname: hit.existing.nickname,
+        birthday: hit.existing.birthday,
+        parentName: hit.existing.parent.fullName,
+      });
+    }
+    return matches;
   },
 
   async registerFamily(input: RegisterInput) {
@@ -174,6 +220,7 @@ export const memoryRepository: KidsRepository = {
       birthday: c.birthday,
       homeService: c.homeService.trim() || "9am",
       createdAt: now(),
+      deletedAt: null,
     }));
     store().children.push(...children);
     return { parent, children };
@@ -199,6 +246,9 @@ export const memoryRepository: KidsRepository = {
     }
     const child = store().children.find((c) => c.id === childId);
     if (!child) throw new Error("Child not found");
+    if (child.deletedAt) {
+      throw new Error("That child was removed from the roster.");
+    }
     assertEligibleAge(child.birthday);
 
     const duplicate = store().attendance.find(

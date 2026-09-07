@@ -18,6 +18,18 @@ export type Child = {
   birthday: string; // YYYY-MM-DD
   homeService: string;
   createdAt: string;
+  /** Soft-delete timestamp; null means still on the active roster. */
+  deletedAt: string | null;
+};
+
+/** Existing child that likely matches a new registration attempt. */
+export type DuplicateChildMatch = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  nickname: string;
+  birthday: string;
+  parentName: string;
 };
 
 /** Church service times a Kids Church session can be attached to. */
