@@ -19,6 +19,7 @@ const sampleChild: ChildWithParent = {
   birthday: "2021-01-01",
   homeService: "9am",
   createdAt: "2026-01-01T00:00:00.000Z",
+  deletedAt: null,
   parent: {
     id: "p1",
     fullName: "Estrellado, Denden",

@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { deleteChildAction } from "@/app/actions";
 import {
   downloadCsv,
   ROSTER_HEADERS,
@@ -19,12 +22,20 @@ type Props = {
 };
 
 export function ChildrenRoster({ roster }: Props) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
+
+  const visibleRoster = useMemo(
+    () => roster.filter((child) => !removedIds.has(child.id)),
+    [roster, removedIds],
+  );
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return roster;
-    return roster.filter((child) => {
+    if (!q) return visibleRoster;
+    return visibleRoster.filter((child) => {
       const hay = [
         child.lastName,
         child.firstName,
@@ -38,7 +49,7 @@ export function ChildrenRoster({ roster }: Props) {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [roster, query]);
+  }, [visibleRoster, query]);
 
   function exportRoster() {
     downloadCsv(
@@ -46,6 +57,31 @@ export function ChildrenRoster({ roster }: Props) {
       ROSTER_HEADERS,
       rows.map(rosterCells),
     );
+  }
+
+  async function handleDelete(child: ChildWithParent) {
+    if (deletingId) return;
+
+    const confirmed = window.confirm(
+      `Remove ${child.firstName} ${child.lastName} from the roster? Past check-ins stay in history.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(child.id);
+    try {
+      const result = await deleteChildAction(child.id);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setRemovedIds((prev) => new Set(prev).add(child.id));
+      toast.success(`${child.firstName} ${child.lastName} removed from roster`);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove child.");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -72,7 +108,7 @@ export function ChildrenRoster({ roster }: Props) {
             Extract CSV
           </Button>
           <p className="text-sm text-black/55">
-            {rows.length} of {roster.length} children
+            {rows.length} of {visibleRoster.length} children
           </p>
         </div>
 
@@ -90,7 +126,7 @@ export function ChildrenRoster({ roster }: Props) {
         </div>
 
         <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-black/5">
-          <table className="w-full min-w-[60rem] text-left text-sm">
+          <table className="w-full min-w-[66rem] text-left text-sm">
             <thead className="bg-[#2e7d32] text-white">
               <tr>
                 {ROSTER_HEADERS.map((header) => (
@@ -98,40 +134,56 @@ export function ChildrenRoster({ roster }: Props) {
                     {header}
                   </th>
                 ))}
+                <th className="whitespace-nowrap px-3 py-3 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={ROSTER_HEADERS.length}
+                    colSpan={ROSTER_HEADERS.length + 1}
                     className="px-4 py-10 text-center text-black/45"
                   >
-                    {roster.length === 0
+                    {visibleRoster.length === 0
                       ? "No children registered yet. Use Register to add families."
                       : "No matches for that search."}
                   </td>
                 </tr>
               ) : (
-                rows.map((child) => (
-                  <tr key={child.id} className="border-t border-black/5">
-                    <td className="px-3 py-2.5 font-medium">{child.lastName}</td>
-                    <td className="px-3 py-2.5">{child.firstName}</td>
-                    <td className="px-3 py-2.5">{child.nickname || "—"}</td>
-                    <td className="px-3 py-2.5">{getAge(child.birthday)}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5">
-                      {formatBirthdayMdY(child.birthday)}
-                    </td>
-                    <td className="px-3 py-2.5">{child.homeService || "—"}</td>
-                    <td className="px-3 py-2.5">{child.parent.fullName}</td>
-                    <td className="px-3 py-2.5 text-black/70">
-                      {child.parent.address || "—"}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2.5">
-                      {child.parent.contactNumber || "—"}
-                    </td>
-                  </tr>
-                ))
+                rows.map((child) => {
+                  const busy = deletingId === child.id;
+                  return (
+                    <tr key={child.id} className="border-t border-black/5">
+                      <td className="px-3 py-2.5 font-medium">{child.lastName}</td>
+                      <td className="px-3 py-2.5">{child.firstName}</td>
+                      <td className="px-3 py-2.5">{child.nickname || "—"}</td>
+                      <td className="px-3 py-2.5">{getAge(child.birthday)}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        {formatBirthdayMdY(child.birthday)}
+                      </td>
+                      <td className="px-3 py-2.5">{child.homeService || "—"}</td>
+                      <td className="px-3 py-2.5">{child.parent.fullName}</td>
+                      <td className="px-3 py-2.5 text-black/70">
+                        {child.parent.address || "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5">
+                        {child.parent.contactNumber || "—"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={Boolean(deletingId)}
+                          className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                          onClick={() => void handleDelete(child)}
+                        >
+                          {busy ? "Deleting…" : "Delete"}
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

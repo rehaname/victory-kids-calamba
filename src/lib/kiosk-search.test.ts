@@ -12,6 +12,7 @@ const child: ChildWithParent = {
   birthday: "2018-03-01",
   homeService: "9am",
   createdAt: "2026-01-01T00:00:00.000Z",
+  deletedAt: null,
   parent: {
     id: "parent-1",
     fullName: "Maria Dela Cruz",
