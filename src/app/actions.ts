@@ -2,19 +2,27 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { diagnoseDataSource, getRepository, resolveDataSource } from "@/lib/data";
 import type { DataSourceDiagnostics } from "@/lib/data";
 import { formatDuplicateBlockMessage } from "@/lib/child-duplicates";
 import { errorMessage, logServerError } from "@/lib/errors";
+import { kioskDuplicateResult } from "@/lib/kiosk-public";
 import { toKioskChildHit } from "@/lib/kiosk-search";
+import { localDemoPin } from "@/lib/staff-pin-local";
 import { grantStaffSession, requireStaff, StaffAuthError } from "@/lib/staff-session";
 import {
   extractPinFromRemarks,
   isValidPinFormat,
-  localDemoPin,
   normalizePin,
   staffPinConfigured,
 } from "@/lib/staff-pin";
+import {
+  clearPinFailures,
+  clientAddress,
+  pinThrottleDecision,
+  recordPinFailure,
+} from "@/lib/staff-pin-throttle";
 import { buildReceipt } from "@/lib/receipt";
 import { requireLocation, requireServiceTime } from "@/lib/session";
 import { createPublicAdminClient } from "@/lib/supabase/public-admin";
@@ -22,7 +30,6 @@ import { TENANT } from "@/lib/tenant";
 import type {
   AttendanceWithChild,
   ChildWithParent,
-  DuplicateChildMatch,
   KioskChildHit,
   Receipt,
   RegisterInput,
@@ -148,6 +155,18 @@ export async function verifyStaffPinAction(pinInput: string) {
     return { ok: false as const, error: "Enter the 6-digit staff PIN." };
   }
 
+  const headerList = await headers();
+  const attemptKey = clientAddress(
+    headerList.get("x-real-ip"),
+    headerList.get("x-forwarded-for"),
+  );
+  if (!pinThrottleDecision(attemptKey).ok) {
+    return {
+      ok: false as const,
+      error: "Too many attempts. Wait a few minutes and try again.",
+    };
+  }
+
   // Keys present: the profile row is the only accepted PIN. The repo default is local-only.
   const expected = staffPinConfigured()
     ? await readProfileStaffPin()
@@ -163,8 +182,11 @@ export async function verifyStaffPinAction(pinInput: string) {
   }
 
   if (!pinsMatch(pin, expected.pin)) {
+    recordPinFailure(attemptKey);
     return { ok: false as const, error: "Incorrect PIN." };
   }
+
+  clearPinFailures(attemptKey);
 
   try {
     await grantStaffSession();
@@ -451,7 +473,7 @@ export async function kioskStateAction(
 
 export type KioskRegisterResult =
   | { ok: true; children: Array<{ id: string; firstName: string; nickname: string }> }
-  | { ok: false; error: string; duplicates?: DuplicateChildMatch[] };
+  | { ok: false; error: string };
 
 /**
  * Saves the family and hands back the new child ids so the kiosk can offer to
@@ -480,7 +502,7 @@ export async function kioskRegisterAction(
     }
 
     const dup = await blockIfDuplicateChildren(input);
-    if (dup) return dup;
+    if (dup) return kioskDuplicateResult();
 
     const { children } = await getRepository().registerFamily({
       ...input,

@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  DEFAULT_STAFF_PIN,
-  extractPinFromRemarks,
-  isValidPinFormat,
-  localDemoPin,
-  normalizePin,
-} from "@/lib/staff-pin";
+import { DEFAULT_STAFF_PIN, localDemoPin } from "@/lib/staff-pin-local";
+import { extractPinFromRemarks, isValidPinFormat, normalizePin } from "@/lib/staff-pin";
 
 test("normalizePin keeps only 6 digits", () => {
   assert.equal(normalizePin("33-16-16"), "331616");

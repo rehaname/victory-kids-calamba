@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { deleteChildAction } from "@/app/actions";
 import {
@@ -34,6 +34,7 @@ export function ChildrenRoster({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteLock = useRef(false);
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
 
   const visibleRoster = useMemo(
@@ -69,12 +70,16 @@ export function ChildrenRoster({
   }
 
   async function handleDelete(child: ChildWithParent) {
-    if (deletingId) return;
+    if (deleteLock.current) return;
+    deleteLock.current = true;
 
     const confirmed = window.confirm(
       `Remove ${child.firstName} ${child.lastName} from the roster? Past check-ins stay in history.`,
     );
-    if (!confirmed) return;
+    if (!confirmed) {
+      deleteLock.current = false;
+      return;
+    }
 
     setDeletingId(child.id);
     try {
@@ -89,6 +94,7 @@ export function ChildrenRoster({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not remove child.");
     } finally {
+      deleteLock.current = false;
       setDeletingId(null);
     }
   }

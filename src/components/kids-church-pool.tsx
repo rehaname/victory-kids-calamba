@@ -7,6 +7,7 @@ import {
   closeSessionAction,
   getSessionRosterAction,
   startSessionAction,
+  type SessionRosterResult,
 } from "@/app/actions";
 import {
   AGE_POOL_LABELS,
@@ -77,6 +78,11 @@ export function KidsChurchPool({
   const [selectedChild, setSelectedChild] = useState<AttendanceWithChild | null>(null);
   const [checkoutTarget, setCheckoutTarget] = useState<AttendanceWithChild | null>(null);
   const [claimantName, setClaimantName] = useState("");
+  /** Failed roster read for one session. A failure does not replace loaded rows. */
+  const [rosterNotice, setRosterNotice] = useState<{
+    sessionId: string;
+    error: string;
+  } | null>(null);
 
   const selected =
     initialOpenSessions.find((s) => s.id === pickedId) ??
@@ -86,16 +92,34 @@ export function KidsChurchPool({
 
   const selectedId = selected?.id ?? null;
 
+  function applyRoster(sessionId: string, result: SessionRosterResult) {
+    if (!result.ok) {
+      setRosterNotice({ sessionId, error: result.error });
+      return;
+    }
+    setRosterNotice((current) => (current?.sessionId === sessionId ? null : current));
+    setRowsBySession((prev) => ({ ...prev, [sessionId]: result.rows }));
+  }
+
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
-    getSessionRosterAction(selectedId).then((result) => {
-      if (cancelled || !result.ok) return;
-      setRowsBySession((prev) => ({ ...prev, [selectedId]: result.rows }));
-    });
+    getSessionRosterAction(selectedId)
+      .then((result) => {
+        if (!cancelled) applyRoster(selectedId, result);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRosterNotice({
+          sessionId: selectedId,
+          error: "Could not load who is checked in.",
+        });
+      });
     return () => {
       cancelled = true;
     };
+    // applyRoster is recreated each render and only writes state for this id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
   const active = useMemo(() => {
@@ -105,6 +129,10 @@ export function KidsChurchPool({
       (selectedId === initialSession?.id ? initialActive : [])
     );
   }, [selectedId, rowsBySession, initialSession?.id, initialActive]);
+
+  const rosterError = rosterNotice?.sessionId === selectedId ? rosterNotice.error : null;
+  const rosterKnown =
+    selectedId != null && Object.prototype.hasOwnProperty.call(rowsBySession, selectedId);
 
   const pools = useMemo(() => {
     const grouped: Record<AgePool, AttendanceWithChild[]> = {
@@ -218,7 +246,17 @@ export function KidsChurchPool({
               </div>
             </section>
 
-            {active.length === 0 ? (
+            {rosterError && rosterKnown ? (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-950">
+                {rosterError} The list already on screen was kept.
+              </div>
+            ) : null}
+
+            {active.length === 0 && rosterError && !rosterKnown ? (
+              <EmptyState title={rosterError} />
+            ) : active.length === 0 && !rosterKnown ? (
+              <EmptyState title="Loading…" />
+            ) : active.length === 0 ? (
               <EmptyState title="No kids in the pool yet — tap Check in a child to start" />
             ) : (
               <div className="grid gap-4 lg:grid-cols-3">
@@ -247,10 +285,14 @@ export function KidsChurchPool({
         active={active}
         onRegistered={() => {
           if (selectedId) {
-            getSessionRosterAction(selectedId).then((result) => {
-              if (!result.ok) return;
-              setRowsBySession((prev) => ({ ...prev, [selectedId]: result.rows }));
-            });
+            getSessionRosterAction(selectedId)
+              .then((result) => applyRoster(selectedId, result))
+              .catch(() => {
+                setRosterNotice({
+                  sessionId: selectedId,
+                  error: "Could not load who is checked in.",
+                });
+              });
           }
         }}
       />
@@ -351,7 +393,7 @@ export function KidsChurchPool({
             <Button
               size="xl"
               className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b]"
-              disabled={pending || !claimantName.trim()}
+              disabled={pending || busyAction === "checkout" || !claimantName.trim()}
               onClick={() => {
                 if (!checkoutTarget) return;
                 run(async () => {
@@ -368,7 +410,7 @@ export function KidsChurchPool({
                 }, "Checked out", "checkout");
               }}
             >
-              {pending ? "Checking out…" : "Confirm Checkout"}
+              {busyAction === "checkout" ? "Checking out…" : "Confirm Checkout"}
             </Button>
           </DialogFooter>
         </DialogContent>

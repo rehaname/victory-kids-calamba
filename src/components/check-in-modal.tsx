@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { checkInAction, registerFamilyAction, searchChildrenAction } from "@/app/actions";
 import {
@@ -48,7 +48,9 @@ export function CheckInModal({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ChildWithParent[]>([]);
   const [searchError, setSearchError] = useState("");
-  const [searchPending, startSearch] = useTransition();
+  const [searching, setSearching] = useState(false);
+  const searchSeq = useRef(0);
+  const [, startSearch] = useTransition();
   const [pending, startTransition] = useTransition();
   const lockSubmit = useSubmitLock();
 
@@ -93,18 +95,27 @@ export function CheckInModal({
   function onSearch(value: string) {
     setQuery(value);
     setSearchError("");
+    setResults([]);
+    const seq = ++searchSeq.current;
+    if (!value.trim()) {
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
     startSearch(async () => {
       try {
         const result = await searchChildrenAction(value);
+        if (seq !== searchSeq.current) return;
         if (!result.ok) {
-          setResults([]);
           setSearchError("Search is unavailable. Try again.");
           return;
         }
         setResults(result.children);
       } catch {
-        setResults([]);
+        if (seq !== searchSeq.current) return;
         setSearchError("Search is unavailable. Try again.");
+      } finally {
+        if (seq === searchSeq.current) setSearching(false);
       }
     });
   }
@@ -135,14 +146,14 @@ export function CheckInModal({
                 className="h-14 text-lg"
                 autoFocus
               />
-              {searchPending && (
+              {searching && (
                 <p className="text-sm text-black/45">Searching…</p>
               )}
             </div>
 
             {query && (
               <div className="space-y-2">
-                {searchError ? (
+                {searching ? null : searchError ? (
                   <p className="rounded-xl border border-dashed border-black/15 px-4 py-6 text-center text-sm text-black/50">
                     {searchError}
                   </p>

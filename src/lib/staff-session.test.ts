@@ -21,6 +21,9 @@ test("tampered, expired, and wrong-secret cookies fail", () => {
   const value = signStaffCookie(now, secret);
   assert.equal(verifyStaffCookie(`${value}x`, now, secret), false);
   assert.equal(verifyStaffCookie(value, now, "other-secret"), false);
+  const [version, expText, sig] = value.split(".");
+  const forgedExp = `${version}.${Number(expText) + 60}.${sig}`;
+  assert.equal(verifyStaffCookie(forgedExp, now, secret), false);
   const expiredAt = now + (STAFF_COOKIE_MAX_AGE_SEC + 5) * 1000;
   assert.equal(verifyStaffCookie(value, expiredAt, secret), false);
   assert.equal(verifyStaffCookie(undefined, now, secret), false);
