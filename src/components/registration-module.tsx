@@ -11,9 +11,11 @@ import {
   RegisterFamilyForm,
 } from "@/components/register-family-form";
 import { Button } from "@/components/ui/button";
+import { useSubmitLock } from "@/lib/use-submit-lock";
 
 export function RegistrationModule() {
   const [pending, startTransition] = useTransition();
+  const lockSubmit = useSubmitLock();
   const [parentName, setParentName] = useState("");
   const [address, setAddress] = useState("");
   const [contact, setContact] = useState("");
@@ -49,7 +51,7 @@ export function RegistrationModule() {
             checkInNow={false}
             showCheckInOption={false}
             pending={pending}
-            submitLabel="Save for later check-in"
+            submitLabel={pending ? "Saving…" : "Save for later check-in"}
             description="Register anytime — no open session needed. On Kids Church day, just search the child’s name to Time In."
             onParentNameChange={setParentName}
             onAddressChange={setAddress}
@@ -57,6 +59,8 @@ export function RegistrationModule() {
             onKidsChange={setKids}
             onCheckInNowChange={() => {}}
             onSubmit={() => {
+              const release = lockSubmit();
+              if (!release) return;
               startTransition(async () => {
                 try {
                   const result = await registerFamilyAction({
@@ -81,6 +85,8 @@ export function RegistrationModule() {
                   toast.error(
                     err instanceof Error ? err.message : "Something went wrong",
                   );
+                } finally {
+                  release();
                 }
               });
             }}

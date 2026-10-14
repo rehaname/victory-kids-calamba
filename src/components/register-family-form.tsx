@@ -68,6 +68,7 @@ export function RegisterFamilyForm({
       className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
+        if (pending) return;
         onSubmit();
       }}
     >

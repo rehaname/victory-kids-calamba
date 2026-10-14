@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Play } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { startSessionAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ export function SessionSelectDialog({
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [location, setLocation] = useState("");
+  const submitLock = useRef(false);
 
   function handleOpenChange(next: boolean) {
     if (!next) setLocation("");
@@ -47,10 +48,12 @@ export function SessionSelectDialog({
   const trimmed = location.trim();
 
   async function start(serviceTime: string) {
+    if (submitLock.current || busy) return;
     if (!trimmed) {
       toast.error("Enter a location (e.g. Halang or Bayan).");
       return;
     }
+    submitLock.current = true;
     setBusy(true);
     try {
       const result = await startSessionAction(serviceTime, trimmed);
@@ -66,6 +69,7 @@ export function SessionSelectDialog({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start session");
     } finally {
+      submitLock.current = false;
       setBusy(false);
     }
   }
@@ -152,7 +156,7 @@ export function SessionSelectDialog({
                 className="h-14 text-base"
               >
                 <Play className="size-4" />
-                {formatServiceTime(serviceTime)}
+                {busy ? "Starting…" : formatServiceTime(serviceTime)}
               </Button>
             ))}
           </div>

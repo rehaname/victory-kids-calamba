@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { fetchWithRetry } from "@/lib/supabase/retry-fetch";
 import { TENANT_SCHEMA } from "@/lib/tenant";
 
 /**
@@ -18,5 +19,6 @@ export function createAdminClient() {
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
     db: { schema: TENANT_SCHEMA },
+    global: { fetch: fetchWithRetry },
   });
 }

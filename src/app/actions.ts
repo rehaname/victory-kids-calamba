@@ -1,24 +1,35 @@
 "use server";
 
+import { timingSafeEqual } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { diagnoseDataSource, getRepository, resolveDataSource } from "@/lib/data";
+import type { DataSourceDiagnostics } from "@/lib/data";
 import { formatDuplicateBlockMessage } from "@/lib/child-duplicates";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage, logServerError } from "@/lib/errors";
+import { kioskDuplicateResult } from "@/lib/kiosk-public";
 import { toKioskChildHit } from "@/lib/kiosk-search";
+import { localDemoPin } from "@/lib/staff-pin-local";
+import { grantStaffSession, requireStaff, StaffAuthError } from "@/lib/staff-session";
 import {
-  DEFAULT_STAFF_PIN,
   extractPinFromRemarks,
   isValidPinFormat,
   normalizePin,
   staffPinConfigured,
 } from "@/lib/staff-pin";
+import {
+  clearPinFailures,
+  clientAddress,
+  pinThrottleDecision,
+  recordPinFailure,
+} from "@/lib/staff-pin-throttle";
 import { buildReceipt } from "@/lib/receipt";
 import { requireLocation, requireServiceTime } from "@/lib/session";
 import { createPublicAdminClient } from "@/lib/supabase/public-admin";
 import { TENANT } from "@/lib/tenant";
 import type {
   AttendanceWithChild,
-  DuplicateChildMatch,
+  ChildWithParent,
   KioskChildHit,
   Receipt,
   RegisterInput,
@@ -39,6 +50,19 @@ function refreshChildren() {
   revalidatePath("/children");
 }
 
+function pinsMatch(left: string, right: string) {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function caughtConfigError(diagnostics: DataSourceDiagnostics, err: unknown) {
+  if (err instanceof StaffAuthError) return errorMessage(err);
+  if (diagnostics.mode === "error" && diagnostics.message) return diagnostics.message;
+  return errorMessage(err);
+}
+
 export type DashboardData = {
   session: Session | null;
   openSessions: Session[];
@@ -53,6 +77,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   const diagnostics = diagnoseDataSource();
 
   try {
+    await requireStaff();
     const dataSource = resolveDataSource();
     const repo = getRepository();
     const openSessions = await repo.listOpenSessions();
@@ -69,23 +94,60 @@ export async function getDashboardData(): Promise<DashboardData> {
       missingEnv: diagnostics.missing,
     };
   } catch (err) {
-    const message = errorMessage(err);
-    console.error("getDashboardData failed:", message);
+    logServerError("getDashboardData failed", err);
     return {
       session: null,
       openSessions: [],
       active: [],
       sessions: [],
       dataSource: "error",
-      configError: diagnostics.message || message,
+      configError: caughtConfigError(diagnostics, err),
       missingEnv: diagnostics.missing,
     };
   }
 }
 
 /**
+ * Active victory_calamba admin PIN from profiles.remarks.
+ * Does not consult the repo default or KIOSK_STAFF_PIN.
+ */
+async function readProfileStaffPin(): Promise<
+  { ok: true; pin: string } | { ok: false; error: string }
+> {
+  try {
+    const supabase = createPublicAdminClient();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("remarks")
+      .eq("tenant", TENANT)
+      .eq("role", "admin")
+      .eq("status", "active")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      return { ok: false, error: "Could not verify PIN. Try again." };
+    }
+
+    const pin = extractPinFromRemarks(data?.remarks as string | null);
+    if (!pin) {
+      return {
+        ok: false,
+        error: "Staff PIN is not configured. Ask an admin to set profiles.remarks.",
+      };
+    }
+    return { ok: true, pin };
+  } catch (err) {
+    logServerError("verifyStaffPinAction failed", err);
+    return { ok: false, error: errorMessage(err, "Could not verify PIN. Try again.") };
+  }
+}
+
+/**
  * Verify the 6-digit staff PIN against public.profiles.remarks
  * for the victory_calamba admin profile. Church can update remarks anytime.
+ * A match sets an httpOnly cookie. The PIN itself is not stored.
  */
 export async function verifyStaffPinAction(pinInput: string) {
   const pin = normalizePin(pinInput);
@@ -93,43 +155,44 @@ export async function verifyStaffPinAction(pinInput: string) {
     return { ok: false as const, error: "Enter the 6-digit staff PIN." };
   }
 
-  let expected: string | null = null;
-
-  if (staffPinConfigured()) {
-    try {
-      const supabase = createPublicAdminClient();
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("remarks")
-        .eq("tenant", TENANT)
-        .eq("role", "admin")
-        .eq("status", "active")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        return { ok: false as const, error: "Could not verify PIN. Try again." };
-      }
-
-      expected = extractPinFromRemarks(data?.remarks as string | null);
-    } catch (err) {
-      console.error("verifyStaffPinAction failed:", errorMessage(err));
-      return { ok: false as const, error: "Could not verify PIN. Try again." };
-    }
-  } else {
-    expected = process.env.KIOSK_STAFF_PIN?.trim() || DEFAULT_STAFF_PIN;
+  const headerList = await headers();
+  const attemptKey = clientAddress(
+    headerList.get("x-real-ip"),
+    headerList.get("x-forwarded-for"),
+  );
+  if (!pinThrottleDecision(attemptKey).ok) {
+    return {
+      ok: false as const,
+      error: "Too many attempts. Wait a few minutes and try again.",
+    };
   }
 
-  if (!expected || !isValidPinFormat(expected)) {
+  // Keys present: the profile row is the only accepted PIN. The repo default is local-only.
+  const expected = staffPinConfigured()
+    ? await readProfileStaffPin()
+    : { ok: true as const, pin: localDemoPin() };
+
+  if (!expected.ok) return expected;
+
+  if (!isValidPinFormat(expected.pin)) {
     return {
       ok: false as const,
       error: "Staff PIN is not configured. Ask an admin to set profiles.remarks.",
     };
   }
 
-  if (pin !== expected) {
+  if (!pinsMatch(pin, expected.pin)) {
+    recordPinFailure(attemptKey);
     return { ok: false as const, error: "Incorrect PIN." };
+  }
+
+  clearPinFailures(attemptKey);
+
+  try {
+    await grantStaffSession();
+  } catch (err) {
+    logServerError("grantStaffSession failed", err);
+    return { ok: false as const, error: "Could not start the staff session. Try again." };
   }
 
   return { ok: true as const };
@@ -137,6 +200,7 @@ export async function verifyStaffPinAction(pinInput: string) {
 
 export async function startSessionAction(serviceTime: string, location: string) {
   try {
+    await requireStaff();
     requireServiceTime(serviceTime);
     requireLocation(location);
     const repo = getRepository();
@@ -145,21 +209,19 @@ export async function startSessionAction(serviceTime: string, location: string) 
     refreshHistory();
     return { ok: true as const, session };
   } catch (err) {
+    logServerError("startSessionAction failed", err);
     return { ok: false as const, error: errorMessage(err, "Could not start session.") };
   }
 }
 
 export async function listOpenSessionsAction(): Promise<Session[]> {
-  try {
-    return await getRepository().listOpenSessions();
-  } catch (err) {
-    console.error("listOpenSessionsAction failed:", errorMessage(err));
-    return [];
-  }
+  await requireStaff();
+  return getRepository().listOpenSessions();
 }
 
 export async function closeSessionAction(sessionId: string) {
   try {
+    await requireStaff();
     const repo = getRepository();
     const active = await repo.listActiveAttendance(sessionId);
     if (active.length > 0) {
@@ -173,36 +235,54 @@ export async function closeSessionAction(sessionId: string) {
     refreshHistory();
     return { ok: true as const };
   } catch (err) {
+    logServerError("closeSessionAction failed", err);
     return { ok: false as const, error: errorMessage(err, "Could not close session.") };
   }
 }
 
-export async function searchChildrenAction(query: string) {
-  return getRepository().searchChildren(query);
+export async function searchChildrenAction(
+  query: string,
+): Promise<{ ok: true; children: ChildWithParent[] } | { ok: false; error: string }> {
+  try {
+    await requireStaff();
+    return { ok: true, children: await getRepository().searchChildren(query) };
+  } catch (err) {
+    logServerError("searchChildrenAction failed", err);
+    return { ok: false, error: errorMessage(err, "Search failed.") };
+  }
 }
+
+export type KioskSearchResult =
+  | { ok: true; hits: KioskChildHit[] }
+  | { ok: false; error: string };
 
 /**
  * Public kiosk search. Same matching as the staff search, but the payload is
  * stripped to first name + last initial so a walk-up tablet cannot dump the roster.
  */
-export async function kioskSearchChildrenAction(query: string): Promise<KioskChildHit[]> {
+export async function kioskSearchChildrenAction(query: string): Promise<KioskSearchResult> {
   const q = query.trim();
-  if (q.length < 3) return [];
+  if (q.length < 3) return { ok: true, hits: [] };
   try {
     const rows = await getRepository().searchChildren(q);
-    return rows.map(toKioskChildHit);
+    return { ok: true, hits: rows.map(toKioskChildHit) };
   } catch (err) {
-    console.error("kioskSearchChildrenAction failed:", errorMessage(err));
-    return [];
+    logServerError("kioskSearchChildrenAction failed", err);
+    return { ok: false, error: errorMessage(err, "Search is unavailable. Try again.") };
   }
 }
 
-export async function listChildrenAction() {
+export type ListChildrenResult =
+  | { ok: true; children: ChildWithParent[] }
+  | { ok: false; error: string };
+
+export async function listChildrenAction(): Promise<ListChildrenResult> {
   try {
-    return await getRepository().listChildren();
+    await requireStaff();
+    return { ok: true, children: await getRepository().listChildren() };
   } catch (err) {
-    console.error("listChildrenAction failed:", errorMessage(err));
-    return [];
+    logServerError("listChildrenAction failed", err);
+    return { ok: false, error: errorMessage(err, "Could not load the roster.") };
   }
 }
 
@@ -212,6 +292,7 @@ export async function listChildrenAction() {
  */
 export async function deleteChildAction(childId: string) {
   try {
+    await requireStaff();
     resolveDataSource();
     if (!childId.trim()) {
       return { ok: false as const, error: "Missing child id." };
@@ -222,7 +303,7 @@ export async function deleteChildAction(childId: string) {
     refreshHistory();
     return { ok: true as const };
   } catch (err) {
-    console.error("deleteChildAction failed:", errorMessage(err));
+    logServerError("deleteChildAction failed", err);
     return {
       ok: false as const,
       error: errorMessage(err, "Could not remove child from roster."),
@@ -249,6 +330,7 @@ async function blockIfDuplicateChildren(input: RegisterInput) {
 
 export async function registerFamilyAction(input: RegisterInput) {
   try {
+    await requireStaff();
     resolveDataSource();
 
     if (!input.parent.fullName.trim()) {
@@ -290,29 +372,53 @@ export async function registerFamilyAction(input: RegisterInput) {
     refreshChildren();
     return { ok: true as const };
   } catch (err) {
-    console.error("registerFamilyAction failed:", errorMessage(err));
+    logServerError("registerFamilyAction failed", err);
     return { ok: false as const, error: errorMessage(err, "Could not save registration.") };
   }
 }
 
 export async function checkInAction(childId: string, sessionId?: string) {
-  const repo = getRepository();
-  const session = sessionId
-    ? await repo.getSession(sessionId)
-    : await repo.getOpenSession();
-  if (!session) throw new Error("Start a session before checking in");
-  if (session.status !== "open") throw new Error("That session is already closed");
-  await repo.checkIn(session.id, childId);
-  refreshPool();
+  try {
+    await requireStaff();
+    const repo = getRepository();
+    const session = sessionId
+      ? await repo.getSession(sessionId)
+      : await repo.getOpenSession();
+    if (!session) throw new Error("Start a session before checking in");
+    if (session.status !== "open") throw new Error("That session is already closed");
+    await repo.checkIn(session.id, childId);
+    refreshPool();
+    return { ok: true as const };
+  } catch (err) {
+    logServerError("checkInAction failed", err);
+    return { ok: false as const, error: errorMessage(err, "Could not check in.") };
+  }
 }
 
 export async function checkOutAction(attendanceId: string, claimantName: string) {
-  await getRepository().checkOut(attendanceId, claimantName);
-  refreshPool();
+  try {
+    await requireStaff();
+    await getRepository().checkOut(attendanceId, claimantName);
+    refreshPool();
+    return { ok: true as const };
+  } catch (err) {
+    logServerError("checkOutAction failed", err);
+    return { ok: false as const, error: errorMessage(err, "Could not check out.") };
+  }
 }
 
-export async function getSessionHistoryAction(sessionId: string) {
-  return getRepository().listAttendanceForSession(sessionId);
+export type SessionHistoryResult =
+  | { ok: true; rows: AttendanceWithChild[] }
+  | { ok: false; error: string };
+
+export async function getSessionHistoryAction(sessionId: string): Promise<SessionHistoryResult> {
+  try {
+    await requireStaff();
+    return { ok: true, rows: await getRepository().listAttendanceForSession(sessionId) };
+  } catch (err) {
+    logServerError("getSessionHistoryAction failed", err);
+    return { ok: false, error: errorMessage(err, "Could not load history.") };
+  }
 }
 
 /* ---------------------------------------------------------------- kiosk --- */
@@ -323,6 +429,8 @@ export type KioskState = {
   /** The session the kiosk should check kids into, or null when none is open. */
   activeSession: Session | null;
   configError: string | null;
+  /** Open check-in counts only. Child rows stay on the server. */
+  checkedInCounts: Record<string, number>;
 };
 
 /**
@@ -336,7 +444,13 @@ export async function kioskStateAction(
   const diagnostics = diagnoseDataSource();
   try {
     resolveDataSource();
-    const openSessions = await getRepository().listOpenSessions();
+    const repo = getRepository();
+    const openSessions = await repo.listOpenSessions();
+    const checkedInCounts: Record<string, number> = {};
+    for (const session of openSessions) {
+      const rows = await repo.listActiveAttendance(session.id);
+      checkedInCounts[session.id] = rows.length;
+    }
     const preferred = preferredSessionId
       ? openSessions.find((s) => s.id === preferredSessionId)
       : undefined;
@@ -344,21 +458,22 @@ export async function kioskStateAction(
       openSessions,
       activeSession: preferred ?? openSessions[0] ?? null,
       configError: diagnostics.message,
+      checkedInCounts,
     };
   } catch (err) {
-    const message = errorMessage(err);
-    console.error("kioskStateAction failed:", message);
+    logServerError("kioskStateAction failed", err);
     return {
       openSessions: [],
       activeSession: null,
-      configError: diagnostics.message || message,
+      configError: caughtConfigError(diagnostics, err),
+      checkedInCounts: {},
     };
   }
 }
 
 export type KioskRegisterResult =
   | { ok: true; children: Array<{ id: string; firstName: string; nickname: string }> }
-  | { ok: false; error: string; duplicates?: DuplicateChildMatch[] };
+  | { ok: false; error: string };
 
 /**
  * Saves the family and hands back the new child ids so the kiosk can offer to
@@ -387,7 +502,7 @@ export async function kioskRegisterAction(
     }
 
     const dup = await blockIfDuplicateChildren(input);
-    if (dup) return dup;
+    if (dup) return kioskDuplicateResult();
 
     const { children } = await getRepository().registerFamily({
       ...input,
@@ -403,7 +518,7 @@ export async function kioskRegisterAction(
       })),
     };
   } catch (err) {
-    console.error("kioskRegisterAction failed:", errorMessage(err));
+    logServerError("kioskRegisterAction failed", err);
     return { ok: false, error: errorMessage(err, "Could not save registration.") };
   }
 }
@@ -437,36 +552,40 @@ export async function kioskCheckInAction(
     refreshHistory();
     return { ok: true, receipt: buildReceipt(hydrated, session) };
   } catch (err) {
-    console.error("kioskCheckInAction failed:", errorMessage(err));
+    logServerError("kioskCheckInAction failed", err);
     return { ok: false, error: errorMessage(err, "Could not check in.") };
   }
 }
 
-/** Currently checked-in kids for the settings roster, newest arrival last. */
-export async function getSessionRosterAction(
-  sessionId: string,
-): Promise<AttendanceWithChild[]> {
+export type SessionRosterResult =
+  | { ok: true; rows: AttendanceWithChild[] }
+  | { ok: false; error: string };
+
+/** Currently checked-in kids for staff screens. Not available without the staff cookie. */
+export async function getSessionRosterAction(sessionId: string): Promise<SessionRosterResult> {
   try {
-    return await getRepository().listActiveAttendance(sessionId);
+    await requireStaff();
+    return { ok: true, rows: await getRepository().listActiveAttendance(sessionId) };
   } catch (err) {
-    console.error("getSessionRosterAction failed:", errorMessage(err));
-    return [];
+    logServerError("getSessionRosterAction failed", err);
+    return { ok: false, error: errorMessage(err, "Could not load who is checked in.") };
   }
 }
 
+export type ReceiptResult = { ok: true; receipt: Receipt } | { ok: false; error: string };
+
 /** Rebuilds a slip for reprinting from the settings roster. */
-export async function getReceiptAction(
-  attendanceId: string,
-): Promise<Receipt | null> {
+export async function getReceiptAction(attendanceId: string): Promise<ReceiptResult> {
   try {
+    await requireStaff();
     const repo = getRepository();
     const attendance = await repo.getAttendance(attendanceId);
-    if (!attendance) return null;
+    if (!attendance) return { ok: false, error: "That check-in no longer exists." };
     const session = await repo.getSession(attendance.sessionId);
-    if (!session) return null;
-    return buildReceipt(attendance, session);
+    if (!session) return { ok: false, error: "That session no longer exists." };
+    return { ok: true, receipt: buildReceipt(attendance, session) };
   } catch (err) {
-    console.error("getReceiptAction failed:", errorMessage(err));
-    return null;
+    logServerError("getReceiptAction failed", err);
+    return { ok: false, error: errorMessage(err, "Could not rebuild that slip.") };
   }
 }

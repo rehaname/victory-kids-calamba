@@ -10,7 +10,6 @@ import {
 } from "react";
 import { toast } from "sonner";
 import {
-  getSessionRosterAction,
   kioskCheckInAction,
   kioskRegisterAction,
   kioskStateAction,
@@ -35,7 +34,8 @@ import {
   subscribeSelectedSessionId,
   writeSelectedSessionId,
 } from "@/lib/kiosk-session";
-import { sessionDisplayName } from "@/lib/session";
+import { sessionDisplayName, staleSessionWarning } from "@/lib/session";
+import { useSubmitLock } from "@/lib/use-submit-lock";
 import type { Receipt } from "@/lib/types";
 
 /** Steps that show a result and should time out back to the welcome screen. */
@@ -49,6 +49,7 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
   const [state, setState] = useState<KioskState>(initialState);
   const [step, setStep] = useState<Step>("home");
   const [pending, startTransition] = useTransition();
+  const lockSubmit = useSubmitLock();
 
   const [parentName, setParentName] = useState("");
   const [address, setAddress] = useState("");
@@ -58,10 +59,6 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [checkingInChildId, setCheckingInChildId] = useState<string | null>(null);
-  /** Tagged with the session it came from so a session switch discards it. */
-  const [roster, setRoster] = useState<{ sessionId: string; childIds: string[] } | null>(
-    null,
-  );
 
   // The server cannot read this device's localStorage, so the preferred session
   // is resolved on the client against the open sessions the server did send.
@@ -73,26 +70,16 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
   const activeSession =
     state.openSessions.find((s) => s.id === selectedSessionId) ?? state.activeSession;
 
-  const activeSessionId = activeSession?.id ?? null;
-  const checkedInChildIds =
-    roster && roster.sessionId === activeSessionId ? roster.childIds : [];
-
   const refresh = useCallback(async () => {
     setState(await kioskStateAction(readSelectedSessionId()));
   }, []);
 
-  // Who is already in, so the search screen can grey out duplicate check-ins.
-  useEffect(() => {
-    if (!activeSessionId) return;
-    let cancelled = false;
-    getSessionRosterAction(activeSessionId).then((rows) => {
-      if (cancelled) return;
-      setRoster({ sessionId: activeSessionId, childIds: rows.map((r) => r.childId) });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSessionId, step]);
+  const staleWarning = activeSession
+    ? staleSessionWarning(
+        activeSession,
+        state.checkedInCounts[activeSession.id] ?? 0,
+      )
+    : null;
 
   const resetToHome = useCallback(() => {
     setStep("home");
@@ -116,46 +103,60 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
   }
 
   function submitRegistration() {
+    const release = lockSubmit();
+    if (!release) return;
     startTransition(async () => {
-      const result = await kioskRegisterAction({
-        parent: { fullName: parentName, address, contactNumber: contact },
-        children: kids.map((kid) => ({
-          ...kid,
-          homeService: kid.homeService || DEFAULT_HOME_SERVICE,
-        })),
-      });
+      try {
+        const result = await kioskRegisterAction({
+          parent: { fullName: parentName, address, contactNumber: contact },
+          children: kids.map((kid) => ({
+            ...kid,
+            homeService: kid.homeService || DEFAULT_HOME_SERVICE,
+          })),
+        });
 
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
+        setRegistered(result.children);
+        setStep("prompt");
+      } finally {
+        release();
       }
-      setRegistered(result.children);
-      setStep("prompt");
     });
   }
 
   function checkInRegistered() {
     if (!requireSession()) return;
+    const release = lockSubmit();
+    if (!release) return;
     const sessionId = activeSession!.id;
 
     startTransition(async () => {
-      const slips: Receipt[] = [];
-      for (const child of registered) {
-        const result = await kioskCheckInAction(sessionId, child.id);
-        if (result.ok) {
-          slips.push(result.receipt);
-        } else {
-          toast.error(`${child.firstName}: ${result.error}`);
+      try {
+        const slips: Receipt[] = [];
+        for (const child of registered) {
+          const result = await kioskCheckInAction(sessionId, child.id);
+          if (result.ok) {
+            slips.push(result.receipt);
+          } else {
+            toast.error(`${child.firstName}: ${result.error}`);
+          }
         }
+        if (!slips.length) return;
+        setReceipts(slips);
+        setStep("receipt");
+      } finally {
+        release();
       }
-      if (!slips.length) return;
-      setReceipts(slips);
-      setStep("receipt");
     });
   }
 
   function checkInExisting(childId: string, firstName: string) {
     if (!requireSession()) return;
+    const release = lockSubmit();
+    if (!release) return;
     const sessionId = activeSession!.id;
     setCheckingInChildId(childId);
 
@@ -170,6 +171,7 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
         setStep("receipt");
       } finally {
         setCheckingInChildId(null);
+        release();
       }
     });
   }
@@ -177,15 +179,18 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
   return (
     <KioskShell
       banner={
-        state.configError ? (
-          <KioskBanner tone="warning">{state.configError}</KioskBanner>
-        ) : !activeSession ? (
-          <KioskBanner tone="warning">
-            No session is open. Staff can start one from Settings.
-          </KioskBanner>
-        ) : (
-          <KioskBanner>{sessionDisplayName(activeSession)} · now open</KioskBanner>
-        )
+        <>
+          {state.configError ? (
+            <KioskBanner tone="warning">{state.configError}</KioskBanner>
+          ) : !activeSession ? (
+            <KioskBanner tone="warning">
+              No session is open. Staff can start one from Settings.
+            </KioskBanner>
+          ) : (
+            <KioskBanner>{sessionDisplayName(activeSession)} · now open</KioskBanner>
+          )}
+          {staleWarning ? <KioskBanner tone="warning">{staleWarning}</KioskBanner> : null}
+        </>
       }
       actions={
         <div className="flex shrink-0 items-center gap-1">
@@ -252,7 +257,7 @@ export function KioskApp({ initialState }: { initialState: KioskState }) {
 
       {step === "search" && (
         <KioskCheckInSearch
-          checkedInChildIds={checkedInChildIds}
+          checkedInChildIds={[]}
           pendingChildId={checkingInChildId}
           onSelect={(child) => checkInExisting(child.id, child.firstName)}
           onRegisterInstead={() => setStep("register")}

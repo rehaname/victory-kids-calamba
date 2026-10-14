@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { verifyStaffPinAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,9 +26,15 @@ export function StaffPinDialog({ open, onOpenChange, onUnlocked }: Props) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  const submittedPin = useRef("");
 
   useEffect(() => {
-    if (pin.length !== 6 || pending) return;
+    if (pin.length !== 6 || pending) {
+      if (pin.length !== 6) submittedPin.current = "";
+      return;
+    }
+    if (submittedPin.current === pin) return;
+    submittedPin.current = pin;
 
     startTransition(async () => {
       const result = await verifyStaffPinAction(pin);

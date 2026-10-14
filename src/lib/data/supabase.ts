@@ -147,6 +147,34 @@ function db() {
   return createAdminClient();
 }
 
+/**
+ * If the child insert failed and nothing points at the new parent, remove that parent.
+ * A later count near 800 should move this into one schema function instead.
+ */
+async function deleteOrphanParent(
+  supabase: ReturnType<typeof db>,
+  parentId: string,
+) {
+  const { count, error } = await supabase
+    .from("children")
+    .select("id", { count: "exact", head: true })
+    .eq("parent_id", parentId);
+  if (error || (count ?? 0) > 0) return;
+  await supabase.from("parents").delete().eq("id", parentId);
+}
+
+/** In-memory name match. Nickname and parent full name are included. */
+export function childMatchesQuery(
+  child: { firstName: string; lastName: string; nickname: string; parent: { fullName: string } },
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return `${child.firstName} ${child.lastName} ${child.nickname} ${child.parent.fullName}`
+    .toLowerCase()
+    .includes(q);
+}
+
 export const supabaseRepository: KidsRepository = {
   async getOpenSession() {
     const supabase = db();
@@ -231,32 +259,17 @@ export const supabaseRepository: KidsRepository = {
 
   async searchChildren(query) {
     const supabase = db();
-    let req = supabase
+    // Whole roster is under the PostgREST max_rows cap, so parent and nickname
+    // matching stays in memory instead of a filter string.
+    const { data, error } = await supabase
       .from("children")
       .select("*, parents(*)")
       .is("deleted_at", null)
       .order("last_name")
       .order("first_name");
-
-    const q = query.trim();
-    if (q) {
-      // Simple OR ilike across child + parent names via filter string
-      req = req.or(
-        `first_name.ilike.%${q}%,last_name.ilike.%${q}%`,
-      );
-    }
-
-    const { data, error } = await req;
     if (error) throwDb(error, "Could not search children");
     const rows = ((data ?? []) as ChildRow[]).map((row) => mapChild(row));
-
-    if (!q) return rows;
-    const lower = q.toLowerCase();
-    return rows.filter((c) =>
-      `${c.firstName} ${c.lastName} ${c.nickname} ${c.parent.fullName}`
-        .toLowerCase()
-        .includes(lower),
-    );
+    return rows.filter((child) => childMatchesQuery(child, query));
   },
 
   async listChildren() {
@@ -347,29 +360,34 @@ export const supabaseRepository: KidsRepository = {
     if (parentError) throwDb(parentError, "Could not save parent");
 
     const parent = mapParent(parentRow as ParentRow);
-    const { data: childRows, error: childError } = await supabase
-      .from("children")
-      .insert(
-        input.children.map((c) => ({
-          parent_id: parent.id,
-          first_name: c.firstName.trim(),
-          last_name: c.lastName.trim(),
-          nickname: (c.nickname ?? "").trim(),
-          birthday: c.birthday,
-          home_service: c.homeService.trim() || "9am",
-        })),
-      )
-      .select("*");
-    if (childError) throwDb(childError, "Could not save children");
+    try {
+      const { data: childRows, error: childError } = await supabase
+        .from("children")
+        .insert(
+          input.children.map((c) => ({
+            parent_id: parent.id,
+            first_name: c.firstName.trim(),
+            last_name: c.lastName.trim(),
+            nickname: (c.nickname ?? "").trim(),
+            birthday: c.birthday,
+            home_service: c.homeService.trim() || "9am",
+          })),
+        )
+        .select("*");
+      if (childError) throwDb(childError, "Could not save children");
 
-    const children: Child[] = ((childRows ?? []) as ChildRow[]).map((row) => {
-      // The caller already has the parent; drop the copy hanging off each child.
-      const { parent: _unused, ...child } = mapChild(row, parent);
-      void _unused;
-      return child;
-    });
+      const children: Child[] = ((childRows ?? []) as ChildRow[]).map((row) => {
+        // The caller already has the parent; drop the copy hanging off each child.
+        const { parent: _unused, ...child } = mapChild(row, parent);
+        void _unused;
+        return child;
+      });
 
-    return { parent, children };
+      return { parent, children };
+    } catch (err) {
+      await deleteOrphanParent(supabase, parent.id);
+      throw err;
+    }
   },
 
   async listActiveAttendance(sessionId) {

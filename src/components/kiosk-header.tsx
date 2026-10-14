@@ -10,6 +10,8 @@ type Props = {
   session?: Session | null;
   openSessions?: Session[];
   pending?: boolean;
+  /** Which session control is in flight, so the label matches that button. */
+  pendingAction?: "start" | "close" | null;
   showSessionControls?: boolean;
   onStartSession?: () => void;
   onCloseSession?: () => void;
@@ -27,6 +29,7 @@ export function KioskHeader({
   session = null,
   openSessions = [],
   pending = false,
+  pendingAction = null,
   showSessionControls = false,
   onStartSession,
   onCloseSession,
@@ -116,10 +119,10 @@ export function KioskHeader({
                   </Badge>
                 )}
                 <Button size="xl" variant="outline" disabled={pending} onClick={onStartSession}>
-                  Start another
+                  {pendingAction === "start" ? "Starting…" : "Start another"}
                 </Button>
                 <Button size="xl" variant="outline" disabled={pending} onClick={onCloseSession}>
-                  Close session
+                  {pendingAction === "close" ? "Closing…" : "Close session"}
                 </Button>
               </>
             ) : (
@@ -133,7 +136,7 @@ export function KioskHeader({
                   disabled={pending}
                   onClick={onStartSession}
                 >
-                  Start Kids Church session
+                  {pendingAction === "start" ? "Starting…" : "Start Kids Church session"}
                 </Button>
               </>
             )

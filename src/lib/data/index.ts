@@ -1,5 +1,8 @@
 import { memoryRepository } from "@/lib/data/memory";
 import type { KidsRepository } from "@/lib/data/repository";
+import { MEMORY_ON_VERCEL_ERROR, NOT_CONFIGURED_ERROR } from "@/lib/data/setup-error";
+
+export { isEnvironmentSetupError } from "@/lib/data/setup-error";
 
 export type DataSourceMode = "supabase" | "memory";
 
@@ -73,9 +76,7 @@ export function resolveDataSource(): DataSourceMode {
 
   if (forced === "memory") {
     if (process.env.VERCEL) {
-      throw new Error(
-        "KIDS_DATA_SOURCE=memory is not allowed on Vercel. Sessions will not survive refresh. Set KIDS_DATA_SOURCE=supabase and Supabase keys.",
-      );
+      throw new Error(MEMORY_ON_VERCEL_ERROR);
     }
     return "memory";
   }
@@ -85,9 +86,7 @@ export function resolveDataSource(): DataSourceMode {
   }
 
   if (process.env.VERCEL) {
-    throw new Error(
-      "Supabase is not configured on Vercel. Add NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, and KIDS_DATA_SOURCE=supabase.",
-    );
+    throw new Error(NOT_CONFIGURED_ERROR);
   }
 
   return "memory";

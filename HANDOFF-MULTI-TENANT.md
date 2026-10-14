@@ -226,7 +226,7 @@ Do not invent a parallel tenant-creation path. Always go through `create_tenant`
 | [`scripts/provision-tenant.mjs`](scripts/provision-tenant.mjs) | Safe create + expose + Kids SQL |
 | [`supabase/sql/01_victory_kids_tables.sql`](supabase/sql/01_victory_kids_tables.sql) | Kids tables + RLS |
 
-Default today: `KIDS_DATA_SOURCE=memory` until provisioning + keys are ready.
+Default today: Supabase when `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are set. `KIDS_DATA_SOURCE=memory` is a local demo only and is refused on Vercel. Production already has the keys and a populated database.
 
 ---
 

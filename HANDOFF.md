@@ -9,6 +9,12 @@ Base branch: `main`
 
 Related multi-tenant handoff: [`HANDOFF-MULTI-TENANT.md`](./HANDOFF-MULTI-TENANT.md)
 
+## Current status (2026-10-14)
+
+Production and Preview already have the Supabase environment variables, including `KIDS_DATA_SOURCE=supabase`. Do not add those keys again. The live `victory_calamba` database is populated; do not treat it as empty. When the three Supabase keys are present, the app uses Supabase. Memory mode is only for local demos off Vercel.
+
+Staff pages (`/`, `/list`, `/history`, `/register`) render no roster until an httpOnly staff cookie is present. The church PIN is the active admin `profiles.remarks` value and is not stored in this repo. `/kiosk` stays public.
+
 ## Goal
 
 Build a simple staff-managed Kids Church check-in kiosk for Victory Calamba (iPad/laptop). Parents type on the church device; staff starts/closes sessions. No parent accounts.
@@ -41,7 +47,7 @@ Search/results must show child full name + parent full name as sub-label.
 - History module at `/history`
 - Staff PIN gate ([`src/components/staff-pin-gate.tsx`](src/components/staff-pin-gate.tsx))
 - Domain model + memory repository for local demo
-- Supabase repository ready behind `KIDS_DATA_SOURCE=supabase`
+- Supabase is the data source when the project keys are present. `KIDS_DATA_SOURCE=memory` is a local demo only.
 - Hardcoded tenant constants in [`src/lib/tenant.ts`](src/lib/tenant.ts):
   - `TENANT = "victory_calamba"`
   - `TENANT_SCHEMA = "victory_calamba"`
@@ -77,17 +83,17 @@ Search/results must show child full name + parent full name as sub-label.
 
 ### Staff PIN unlock (current branch)
 
-- 6-digit PIN stored in `public.profiles.remarks` for `victory_calamba` admin
-- Default PIN: **331616** (John 3:16) — church can update `remarks` anytime in Supabase
-- Asked on first open of a browser tab (`sessionStorage`); **not** asked again on refresh
-- Kids Church session stays open in DB across refresh / tab close; staff re-enters PIN then can Close session
+- 6-digit PIN stored in `public.profiles.remarks` for the `victory_calamba` admin. The app reads that row whenever Supabase keys are set. It does not use the local memory-mode constant.
+- Do not write the church PIN into git, docs, or the cookie. Church staff rotate `remarks` in Supabase.
+- Unlock sets an httpOnly cookie (`Secure`, `SameSite=Lax`, 12 hours). `sessionStorage` is only a UI hint for the kiosk settings menu.
+- Kids Church sessions stay open in the database until staff closes them.
 - SQL: [`supabase/sql/02_staff_pin_remarks.sql`](supabase/sql/02_staff_pin_remarks.sql)
 
 ## Remaining next steps
 
-### 1) Optional: harden PIN with a short-lived server cookie
+### 1) Staff session cookie
 
-Client `sessionStorage` unlock is enough for a staff-owned iPad. For stronger protection, set an httpOnly cookie after `verifyStaffPinAction` and check it in server actions.
+Done in the app. `verifyStaffPinAction` sets the httpOnly cookie after the profile PIN matches, and staff server actions call `requireStaff()` before reading or writing.
 
 ### 2) Vercel env vars (if not already set in dashboard)
 
@@ -132,7 +138,7 @@ With `.env.local` set, run `npm run dev` and exercise:
 
 - `parents` — full_name, address, contact_number
 - `children` — parent_id, first_name, last_name, birthday, home_service
-- `sessions` — started_at, ended_at, status (`open`/`closed`), one open session max
+- `sessions` — started_at, ended_at, status (`open`/`closed`). More than one session may be open.
 - `attendance` — session_id, child_id, time_in, time_out, claimant_name, rfid_tag_id (nullable)
 
 Age pool is computed from birthday (not stored).

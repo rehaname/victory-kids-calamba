@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { fetchWithRetry } from "@/lib/supabase/retry-fetch";
 
 /**
  * Service-role client on the public schema (profiles, etc.).
@@ -16,5 +17,6 @@ export function createPublicAdminClient() {
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
     db: { schema: "public" },
+    global: { fetch: fetchWithRetry },
   });
 }
