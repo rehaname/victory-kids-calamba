@@ -3,7 +3,7 @@ import { TENANT } from "@/lib/tenant";
 /** sessionStorage key — survives refresh, clears when the browser tab is closed. */
 export const STAFF_UNLOCK_KEY = "victory_kids_calamba_unlocked";
 
-/** Default PIN when Supabase is not configured (local memory mode). John 3:16. */
+/** Local memory-mode PIN only. Not the church PIN. Production reads profiles.remarks. */
 export const DEFAULT_STAFF_PIN = "331616";
 
 export function normalizePin(value: string) {
@@ -16,7 +16,9 @@ export function isValidPinFormat(value: string) {
 
 /**
  * Extract a 6-digit PIN from profiles.remarks.
- * Accepts bare "331616" or notes like "PIN: 331616 — change monthly".
+ * Accepts a bare 6-digit value or a note such as "PIN: 123456".
+ * The church PIN is whatever is stored on the profile row. This helper does not
+ * know that value.
  */
 export function extractPinFromRemarks(remarks: string | null | undefined) {
   const raw = (remarks ?? "").trim();
@@ -35,9 +37,17 @@ export function hasSupabaseKeys() {
   );
 }
 
-/** True when PIN should be read from profiles.remarks (Supabase keys present). */
+/** True when PIN must be read from profiles.remarks (Supabase keys present). */
 export function staffPinConfigured() {
   return hasSupabaseKeys();
+}
+
+/**
+ * Local memory-mode PIN only. Never use this when staffPinConfigured() is true.
+ * Production compares the typed PIN to profiles.remarks.
+ */
+export function localDemoPin() {
+  return process.env.KIOSK_STAFF_PIN?.trim() || DEFAULT_STAFF_PIN;
 }
 
 export { TENANT };

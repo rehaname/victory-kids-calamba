@@ -38,6 +38,7 @@ create table if not exists victory_calamba.sessions (
   created_at timestamptz not null default now()
 );
 
+-- Do not apply this file alone; 05 drops sessions_one_open_idx.
 create unique index if not exists sessions_one_open_idx
   on victory_calamba.sessions ((status))
   where status = 'open';

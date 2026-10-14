@@ -25,6 +25,7 @@ import {
   emptyChild,
   RegisterFamilyForm,
 } from "@/components/register-family-form";
+import { useSubmitLock } from "@/lib/use-submit-lock";
 
 type Mode = "search" | "register";
 
@@ -46,7 +47,10 @@ export function CheckInModal({
   const [mode, setMode] = useState<Mode>("search");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ChildWithParent[]>([]);
+  const [searchError, setSearchError] = useState("");
+  const [searchPending, startSearch] = useTransition();
   const [pending, startTransition] = useTransition();
+  const lockSubmit = useSubmitLock();
 
   const [parentName, setParentName] = useState("");
   const [address, setAddress] = useState("");
@@ -58,6 +62,7 @@ export function CheckInModal({
     setMode("search");
     setQuery("");
     setResults([]);
+    setSearchError("");
     setParentName("");
     setAddress("");
     setContact("");
@@ -71,24 +76,35 @@ export function CheckInModal({
   }
 
   function run(action: () => Promise<void>, success?: string) {
+    const release = lockSubmit();
+    if (!release) return;
     startTransition(async () => {
       try {
         await action();
         if (success) toast.success(success);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Something went wrong");
+      } finally {
+        release();
       }
     });
   }
 
   function onSearch(value: string) {
     setQuery(value);
-    startTransition(async () => {
+    setSearchError("");
+    startSearch(async () => {
       try {
-        const rows = await searchChildrenAction(value);
-        setResults(rows);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Search failed");
+        const result = await searchChildrenAction(value);
+        if (!result.ok) {
+          setResults([]);
+          setSearchError("Search is unavailable. Try again.");
+          return;
+        }
+        setResults(result.children);
+      } catch {
+        setResults([]);
+        setSearchError("Search is unavailable. Try again.");
       }
     });
   }
@@ -119,11 +135,18 @@ export function CheckInModal({
                 className="h-14 text-lg"
                 autoFocus
               />
+              {searchPending && (
+                <p className="text-sm text-black/45">Searching…</p>
+              )}
             </div>
 
             {query && (
               <div className="space-y-2">
-                {results.length === 0 ? (
+                {searchError ? (
+                  <p className="rounded-xl border border-dashed border-black/15 px-4 py-6 text-center text-sm text-black/50">
+                    {searchError}
+                  </p>
+                ) : results.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-black/15 px-4 py-6 text-center text-sm text-black/50">
                     No matches found. Register as a new family below.
                   </p>
@@ -160,13 +183,20 @@ export function CheckInModal({
                           className="w-full bg-[#003B8E] text-white hover:bg-[#002c6b] sm:w-auto"
                           onClick={() =>
                             run(async () => {
-                              await checkInAction(child.id, sessionId);
+                              const result = await checkInAction(child.id, sessionId);
+                              if (!result.ok) throw new Error(result.error);
                               handleOpenChange(false);
                               onRegistered?.();
                             }, `${child.firstName} checked in`)
                           }
                         >
-                          {alreadyIn ? "Already in" : pool ? "Time In" : "Not eligible"}
+                          {alreadyIn
+                            ? "Already in"
+                            : !pool
+                              ? "Not eligible"
+                              : pending
+                                ? "Checking in…"
+                                : "Time In"}
                         </Button>
                       </div>
                     );
@@ -196,6 +226,7 @@ export function CheckInModal({
             kids={kids}
             checkInNow={checkInNow}
             pending={pending}
+            submitLabel={pending ? "Saving…" : "Save registration"}
             onParentNameChange={setParentName}
             onAddressChange={setAddress}
             onContactChange={setContact}

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractPinFromRemarks, isValidPinFormat, normalizePin } from "@/lib/staff-pin";
+import {
+  DEFAULT_STAFF_PIN,
+  extractPinFromRemarks,
+  isValidPinFormat,
+  localDemoPin,
+  normalizePin,
+} from "@/lib/staff-pin";
 
 test("normalizePin keeps only 6 digits", () => {
   assert.equal(normalizePin("33-16-16"), "331616");
@@ -11,6 +17,19 @@ test("isValidPinFormat requires exactly 6 digits", () => {
   assert.equal(isValidPinFormat("331616"), true);
   assert.equal(isValidPinFormat("12345"), false);
   assert.equal(isValidPinFormat("1234567"), false);
+});
+
+test("localDemoPin uses the repo constant unless a local override is set", () => {
+  const previous = process.env.KIOSK_STAFF_PIN;
+  delete process.env.KIOSK_STAFF_PIN;
+  try {
+    assert.equal(localDemoPin(), DEFAULT_STAFF_PIN);
+    process.env.KIOSK_STAFF_PIN = "123456";
+    assert.equal(localDemoPin(), "123456");
+  } finally {
+    if (previous === undefined) delete process.env.KIOSK_STAFF_PIN;
+    else process.env.KIOSK_STAFF_PIN = previous;
+  }
 });
 
 test("extractPinFromRemarks reads bare or labeled PIN", () => {

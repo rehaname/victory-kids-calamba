@@ -16,21 +16,31 @@ import {
 } from "@/lib/csv";
 import { sessionDisplayName } from "@/lib/session";
 import type { AttendanceWithChild, Session } from "@/lib/types";
+import { DatabaseStatusBanner } from "@/components/database-status-banner";
 import { KioskHeader } from "@/components/kiosk-header";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
 type Props = {
   sessions: Session[];
+  configError?: string | null;
+  missingEnv?: string[];
+  dataSource?: "supabase" | "memory" | "error";
 };
 
-export function HistoryModule({ sessions }: Props) {
+export function HistoryModule({
+  sessions,
+  configError = null,
+  missingEnv = [],
+  dataSource = "supabase",
+}: Props) {
   const [historySessionId, setHistorySessionId] = useState(sessions[0]?.id ?? "");
   /** Tagged with the session it belongs to, so a switch never shows stale rows. */
   const [loaded, setLoaded] = useState<{
     sessionId: string;
     rows: AttendanceWithChild[];
   } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const historyRows = loaded?.sessionId === historySessionId ? loaded.rows : [];
   const pending = Boolean(historySessionId) && loaded?.sessionId !== historySessionId;
@@ -39,13 +49,22 @@ export function HistoryModule({ sessions }: Props) {
     if (!historySessionId) return;
     let cancelled = false;
     getSessionHistoryAction(historySessionId)
-      .then((rows) => {
-        if (!cancelled) setLoaded({ sessionId: historySessionId, rows });
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          setLoadError(result.error);
+          setLoaded({ sessionId: historySessionId, rows: [] });
+          return;
+        }
+        setLoadError(null);
+        setLoaded({ sessionId: historySessionId, rows: result.rows });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Could not load history";
+        setLoadError(message);
         setLoaded({ sessionId: historySessionId, rows: [] });
-        toast.error(err instanceof Error ? err.message : "Could not load history");
+        toast.error(message);
       });
     return () => {
       cancelled = true;
@@ -75,6 +94,11 @@ export function HistoryModule({ sessions }: Props) {
       />
 
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-6">
+        <DatabaseStatusBanner
+          configError={configError}
+          missingEnv={missingEnv}
+          dataSource={dataSource}
+        />
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" size="xl" asChild>
             <Link href="/">← Back to Kids Church pool</Link>
@@ -98,7 +122,11 @@ export function HistoryModule({ sessions }: Props) {
             disabled={pending}
             onChange={(e) => setHistorySessionId(e.target.value)}
           >
-            {sessions.length === 0 && <option value="">No sessions yet</option>}
+            {sessions.length === 0 && (
+              <option value="">
+                {dataSource === "error" ? "Could not load sessions" : "No sessions yet"}
+              </option>
+            )}
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>
                 {sessionDisplayName(s)} · {s.status}
@@ -129,7 +157,11 @@ export function HistoryModule({ sessions }: Props) {
               {historyRows.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="px-4 py-8 text-center text-black/45">
-                    {pending ? "Loading…" : "Select a session to view attendance."}
+                    {pending
+                      ? "Loading…"
+                      : loadError
+                        ? loadError
+                        : "Select a session to view attendance."}
                   </td>
                 </tr>
               ) : (

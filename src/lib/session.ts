@@ -98,3 +98,16 @@ export function formatSessionDate(sessionDate: string): string {
 export function sessionFullLabel(session: Session): string {
   return `${sessionDisplayName(session)} · ${formatSessionDate(session.sessionDate)}`;
 }
+
+/**
+ * Warning for an open session whose Manila calendar date is not today.
+ * Returns null when the session is from today. Does not close or check anyone out.
+ */
+export function staleSessionWarning(
+  session: Session,
+  checkedIn: number,
+  now: Date = new Date(),
+): string | null {
+  if (session.sessionDate === manilaDate(now)) return null;
+  return `This session is from ${formatSessionDate(session.sessionDate)}, not today. Start today’s session. ${checkedIn} children are still checked in on this one.`;
+}

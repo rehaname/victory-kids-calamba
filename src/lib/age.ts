@@ -1,8 +1,34 @@
-import { differenceInYears, parseISO } from "date-fns";
+import { parseISO } from "date-fns";
+import { APP_TIMEZONE } from "@/lib/tenant";
 import type { AgePool } from "@/lib/types";
 
+/** Calendar year/month/day in Asia/Manila, independent of the server's UTC clock. */
+function manilaCalendar(onDate: Date, timeZone = APP_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(onDate);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return { year: read("year"), month: read("month"), day: read("day") };
+}
+
+/**
+ * Age in whole years from the Manila calendar date, compared to a YYYY-MM-DD birthday.
+ * A birthday that is "today" in Manila is already that age, including 01:00 Asia/Manila.
+ */
 export function getAge(birthday: string, onDate: Date = new Date()): number {
-  return differenceInYears(onDate, parseISO(birthday));
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthday);
+  if (!match) return Number.NaN;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const today = manilaCalendar(onDate);
+  let age = today.year - year;
+  if (today.month < month || (today.month === month && today.day < day)) age -= 1;
+  return age;
 }
 
 export function getAgePool(

@@ -74,7 +74,7 @@ export function StartSessionDialog({
               className="h-16 bg-[#003B8E] text-base text-white hover:bg-[#002c6b] disabled:bg-black/10"
             >
               <Play className="size-4" />
-              {formatServiceTime(serviceTime)}
+              {pending ? "Starting…" : formatServiceTime(serviceTime)}
             </Button>
           ))}
         </div>

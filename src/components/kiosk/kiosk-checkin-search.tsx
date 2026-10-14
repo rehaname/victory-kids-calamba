@@ -30,15 +30,18 @@ export function KioskCheckInSearch({
 }: Props) {
   const [query, setQuery] = useState("");
   /** Tagged with the query it answers, so stale results never render. */
-  const [answer, setAnswer] = useState<{ query: string; rows: KioskChildHit[] } | null>(
-    null,
-  );
+  const [answer, setAnswer] = useState<
+    | { query: string; ok: true; rows: KioskChildHit[] }
+    | { query: string; ok: false }
+    | null
+  >(null);
   const [pending, startTransition] = useTransition();
 
   const trimmed = query.trim();
   const tooShort = trimmed.length > 0 && trimmed.length < MIN_QUERY_LENGTH;
   const searched = answer?.query === trimmed;
-  const results = searched ? answer.rows : [];
+  const searchFailed = searched && answer?.ok === false;
+  const results = searched && answer?.ok ? answer.rows : [];
 
   useEffect(() => {
     if (trimmed.length < MIN_QUERY_LENGTH) return;
@@ -46,9 +49,14 @@ export function KioskCheckInSearch({
     const timer = setTimeout(() => {
       startTransition(async () => {
         try {
-          setAnswer({ query: trimmed, rows: await kioskSearchChildrenAction(trimmed) });
+          const result = await kioskSearchChildrenAction(trimmed);
+          if (!result.ok) {
+            setAnswer({ query: trimmed, ok: false });
+            return;
+          }
+          setAnswer({ query: trimmed, ok: true, rows: result.hits });
         } catch {
-          setAnswer({ query: trimmed, rows: [] });
+          setAnswer({ query: trimmed, ok: false });
         }
       });
     }, DEBOUNCE_MS);
@@ -97,7 +105,13 @@ export function KioskCheckInSearch({
           <p className="py-6 text-center text-base text-black/45">Searching…</p>
         )}
 
-        {searched && !pending && results.length === 0 && (
+        {searched && !pending && searchFailed && (
+          <div className="rounded-2xl border border-dashed border-black/15 px-4 py-8 text-center">
+            <p className="text-base text-black/55">Search is unavailable. Try again.</p>
+          </div>
+        )}
+
+        {searched && !pending && !searchFailed && results.length === 0 && (
           <div className="rounded-2xl border border-dashed border-black/15 px-4 py-8 text-center">
             <p className="text-base text-black/55">No match for &ldquo;{trimmed}&rdquo;.</p>
             <Button

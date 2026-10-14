@@ -1,26 +1,24 @@
 "use client";
 
-import { useState, useSyncExternalStore, useTransition } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { verifyStaffPinAction } from "@/app/actions";
 import { normalizePin, STAFF_UNLOCK_KEY } from "@/lib/staff-pin";
+import { useSubmitLock } from "@/lib/use-submit-lock";
 import { Button } from "@/components/ui/button";
 
 type Props = {
-  children: React.ReactNode;
+  children?: React.ReactNode;
 };
 
 export function StaffPinGate({ children }: Props) {
-  const storedUnlock = useStoredUnlock();
+  const router = useRouter();
   const [unlockedNow, setUnlockedNow] = useState(false);
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
-
-  // Null means the browser has not been read yet, which only happens on the
-  // server render and the hydration pass.
-  const ready = storedUnlock !== null;
-  const unlocked = unlockedNow || storedUnlock === true;
+  const lockSubmit = useSubmitLock();
 
   function press(digit: string) {
     setError("");
@@ -40,33 +38,40 @@ export function StaffPinGate({ children }: Props) {
       setError("Enter all 6 digits.");
       return;
     }
+    const release = lockSubmit();
+    if (!release) return;
 
     startTransition(async () => {
-      const result = await verifyStaffPinAction(value);
-      if (!result.ok) {
-        setError(result.error);
-        setPin("");
-        return;
-      }
       try {
-        sessionStorage.setItem(STAFF_UNLOCK_KEY, "1");
-      } catch {
-        // Private mode may block sessionStorage; still unlock this render.
+        const result = await verifyStaffPinAction(value);
+        if (!result.ok) {
+          setError(result.error);
+          setPin("");
+          return;
+        }
+        try {
+          sessionStorage.setItem(STAFF_UNLOCK_KEY, "1");
+        } catch {
+          // Private mode may block sessionStorage; the cookie is what the server trusts.
+        }
+        setUnlockedNow(true);
+        toast.success("Welcome — Kids Church unlocked");
+        router.refresh();
+      } finally {
+        release();
       }
-      setUnlockedNow(true);
-      toast.success("Welcome — Kids Church unlocked");
     });
   }
 
-  if (!ready) {
+  if (unlockedNow && children) return <>{children}</>;
+
+  if (unlockedNow) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#e8f0ff_0%,_#ffffff_50%,_#f4f6f8_100%)]">
+      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#e8f0ff_0%,_#ffffff_50%,_#f4f6fa_100%)]">
         <p className="text-sm text-black/45">Loading…</p>
       </div>
     );
   }
-
-  if (unlocked) return <>{children}</>;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[radial-gradient(circle_at_top,_#dce8ff_0%,_#ffffff_42%,_#f3f6fa_100%)] px-4 py-10 text-black">
@@ -152,37 +157,11 @@ export function StaffPinGate({ children }: Props) {
         </div>
 
         <p className="mt-6 text-center text-xs leading-relaxed text-black/40">
-          Refresh keeps you unlocked. Closing the tab asks for the PIN again.
+          Staff stay signed in on this browser for 12 hours.
           <br />
           Kids Church sessions stay open until staff closes them.
         </p>
       </div>
     </div>
   );
-}
-
-/**
- * Reads the per-tab unlock flag. sessionStorage does not exist during the
- * server render, so the server snapshot is null and the gate shows a neutral
- * loading state until hydration settles.
- */
-function useStoredUnlock(): boolean | null {
-  return useSyncExternalStore(subscribeUnlock, getUnlock, getServerUnlock);
-}
-
-function subscribeUnlock(listener: () => void): () => void {
-  window.addEventListener("storage", listener);
-  return () => window.removeEventListener("storage", listener);
-}
-
-function getUnlock(): boolean {
-  try {
-    return sessionStorage.getItem(STAFF_UNLOCK_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function getServerUnlock(): null {
-  return null;
 }

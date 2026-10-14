@@ -23,9 +23,11 @@ import {
   subscribeSelectedSessionId,
   writeSelectedSessionId,
 } from "@/lib/kiosk-session";
-import { sessionDisplayName } from "@/lib/session";
+import { sessionDisplayName, staleSessionWarning } from "@/lib/session";
+import { useSubmitLock } from "@/lib/use-submit-lock";
 import type { AgePool, AttendanceWithChild, Session } from "@/lib/types";
 import { CheckInModal } from "@/components/check-in-modal";
+import { DatabaseStatusBanner } from "@/components/database-status-banner";
 import { KioskHeader } from "@/components/kiosk-header";
 import { StartSessionDialog } from "@/components/start-session-dialog";
 import { DEFAULT_HOME_SERVICE } from "@/components/register-family-form";
@@ -60,6 +62,8 @@ export function KidsChurchPool({
   missingEnv = [],
 }: Props) {
   const [pending, startTransition] = useTransition();
+  const [busyAction, setBusyAction] = useState<"start" | "close" | "checkout" | null>(null);
+  const lockSubmit = useSubmitLock();
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
   const pickedId = useSyncExternalStore(
@@ -85,10 +89,9 @@ export function KidsChurchPool({
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
-    getSessionRosterAction(selectedId).then((rows) => {
-      if (!cancelled) {
-        setRowsBySession((prev) => ({ ...prev, [selectedId]: rows }));
-      }
+    getSessionRosterAction(selectedId).then((result) => {
+      if (cancelled || !result.ok) return;
+      setRowsBySession((prev) => ({ ...prev, [selectedId]: result.rows }));
     });
     return () => {
       cancelled = true;
@@ -119,13 +122,23 @@ export function KidsChurchPool({
     return grouped;
   }, [active]);
 
-  function run(action: () => Promise<void>, success?: string) {
+  function run(
+    action: () => Promise<void>,
+    success?: string,
+    kind?: "start" | "close" | "checkout",
+  ) {
+    const release = lockSubmit();
+    if (!release) return;
+    if (kind) setBusyAction(kind);
     startTransition(async () => {
       try {
         await action();
         if (success) toast.success(success);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Something went wrong");
+      } finally {
+        setBusyAction(null);
+        release();
       }
     });
   }
@@ -144,7 +157,7 @@ export function KidsChurchPool({
       setStartOpen(false);
       setCheckInOpen(true);
       toast.success(`${sessionDisplayName(result.session)} started`);
-    });
+    }, undefined, "start");
   }
 
   return (
@@ -156,6 +169,7 @@ export function KidsChurchPool({
         openSessions={initialOpenSessions}
         showSessionControls
         pending={pending}
+        pendingAction={busyAction === "checkout" ? null : busyAction}
         onSelectSession={writeSelectedSessionId}
         onStartSession={() => setStartOpen(true)}
         onCloseSession={() =>
@@ -164,34 +178,24 @@ export function KidsChurchPool({
             const result = await closeSessionAction(selected.id);
             if (!result.ok) throw new Error(result.error);
             if (pickedId === selected.id) writeSelectedSessionId(null);
-          }, "Session closed")
+          }, "Session closed", "close")
         }
       />
 
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6">
-        {configError && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800">
-            <p className="font-semibold">Database not connected — sessions will not be saved</p>
-            <p className="mt-1">{configError}</p>
-            {missingEnv.length > 0 && (
-              <p className="mt-2 font-mono text-xs text-red-700">
-                Missing on Vercel: {missingEnv.join(", ")}
-              </p>
-            )}
-            <p className="mt-2 text-red-700/80">
-              Vercel → Project Settings → Environment Variables → add the Supabase keys, set
-              KIDS_DATA_SOURCE=supabase, then Redeploy.
-            </p>
-          </div>
-        )}
-        {dataSource === "memory" && !configError && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Demo mode (in-memory). Start/Close session is temporary and disappears on refresh.
-            Set Supabase env vars on Vercel to save sessions permanently.
-          </div>
-        )}
+        <DatabaseStatusBanner
+          configError={configError}
+          missingEnv={missingEnv}
+          dataSource={dataSource}
+        />
         {selected ? (
           <>
+            {staleSessionWarning(selected, active.length) && (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-950">
+                {staleSessionWarning(selected, active.length)}
+              </div>
+            )}
+
             <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -229,6 +233,8 @@ export function KidsChurchPool({
               </div>
             )}
           </>
+        ) : dataSource === "error" ? (
+          <EmptyState title="Kids Church could not be loaded. Wait a minute and refresh." />
         ) : (
           <EmptyState title="Start a Kids Church session to open check-in" />
         )}
@@ -241,8 +247,9 @@ export function KidsChurchPool({
         active={active}
         onRegistered={() => {
           if (selectedId) {
-            getSessionRosterAction(selectedId).then((rows) => {
-              setRowsBySession((prev) => ({ ...prev, [selectedId]: rows }));
+            getSessionRosterAction(selectedId).then((result) => {
+              if (!result.ok) return;
+              setRowsBySession((prev) => ({ ...prev, [selectedId]: result.rows }));
             });
           }
         }}
@@ -251,7 +258,7 @@ export function KidsChurchPool({
       <StartSessionDialog
         open={startOpen}
         onOpenChange={setStartOpen}
-        pending={pending}
+        pending={busyAction === "start"}
         onStart={startSession}
       />
 
@@ -348,17 +355,20 @@ export function KidsChurchPool({
               onClick={() => {
                 if (!checkoutTarget) return;
                 run(async () => {
-                  await checkOutAction(checkoutTarget.id, claimantName);
+                  const result = await checkOutAction(checkoutTarget.id, claimantName);
+                  if (!result.ok) throw new Error(result.error);
                   setCheckoutTarget(null);
                   setClaimantName("");
                   if (selectedId) {
-                    const rows = await getSessionRosterAction(selectedId);
-                    setRowsBySession((prev) => ({ ...prev, [selectedId]: rows }));
+                    const roster = await getSessionRosterAction(selectedId);
+                    if (roster.ok) {
+                      setRowsBySession((prev) => ({ ...prev, [selectedId]: roster.rows }));
+                    }
                   }
-                }, "Checked out");
+                }, "Checked out", "checkout");
               }}
             >
-              Confirm Checkout
+              {pending ? "Checking out…" : "Confirm Checkout"}
             </Button>
           </DialogFooter>
         </DialogContent>

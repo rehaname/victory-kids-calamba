@@ -29,6 +29,7 @@ type Props = {
 export function SessionKidsDialog({ open, onOpenChange, session }: Props) {
   /** null means the roster has not come back yet. */
   const [rows, setRows] = useState<AttendanceWithChild[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   /** Bumped by Refresh to re-run the fetch effect. */
   const [reloadToken, setReloadToken] = useState(0);
   const [printingId, setPrintingId] = useState<string | null>(null);
@@ -42,8 +43,15 @@ export function SessionKidsDialog({ open, onOpenChange, session }: Props) {
   useEffect(() => {
     if (!open || !sessionId) return;
     let cancelled = false;
-    getSessionRosterAction(sessionId).then((next) => {
-      if (!cancelled) setRows(next);
+    setLoadError(null);
+    getSessionRosterAction(sessionId).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setLoadError(result.error);
+        setRows([]);
+        return;
+      }
+      setRows(result.rows);
     });
     return () => {
       cancelled = true;
@@ -52,17 +60,19 @@ export function SessionKidsDialog({ open, onOpenChange, session }: Props) {
 
   function reload() {
     setRows(null);
+    setLoadError(null);
     setReloadToken((token) => token + 1);
   }
 
   async function reprint(attendanceId: string) {
     setPrintingId(attendanceId);
     try {
-      const receipt = await getReceiptAction(attendanceId);
-      if (!receipt) {
-        toast.error("Could not rebuild that slip.");
+      const result = await getReceiptAction(attendanceId);
+      if (!result.ok) {
+        toast.error(result.error);
         return;
       }
+      const receipt = result.receipt;
       setPendingSlip(receipt);
       const outcome = await printReceipt(receipt, { reprint: true });
       if (outcome.via === "system") {
@@ -108,7 +118,13 @@ export function SessionKidsDialog({ open, onOpenChange, session }: Props) {
             <p className="py-6 text-center text-sm text-black/45">Loading…</p>
           )}
 
-          {session && rows?.length === 0 && (
+          {session && loadError && (
+            <p className="rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-8 text-center text-sm text-amber-950">
+              {loadError}
+            </p>
+          )}
+
+          {session && !loadError && rows?.length === 0 && (
             <p className="rounded-xl border border-dashed border-black/15 px-4 py-8 text-center text-sm text-black/50">
               No kids are checked in yet.
             </p>

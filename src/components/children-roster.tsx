@@ -12,6 +12,7 @@ import {
 } from "@/lib/csv";
 import { formatBirthdayMdY, getAge } from "@/lib/age";
 import type { ChildWithParent } from "@/lib/types";
+import { DatabaseStatusBanner } from "@/components/database-status-banner";
 import { KioskHeader } from "@/components/kiosk-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,9 +20,17 @@ import { Label } from "@/components/ui/label";
 
 type Props = {
   roster: ChildWithParent[];
+  configError?: string | null;
+  missingEnv?: string[];
+  loadFailed?: boolean;
 };
 
-export function ChildrenRoster({ roster }: Props) {
+export function ChildrenRoster({
+  roster,
+  configError = null,
+  missingEnv = [],
+  loadFailed = false,
+}: Props) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -95,6 +104,7 @@ export function ChildrenRoster({ roster }: Props) {
       />
 
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-6">
+        <DatabaseStatusBanner configError={configError} missingEnv={missingEnv} dataSource={loadFailed ? "error" : "supabase"} />
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" size="xl" asChild>
             <Link href="/">← Back to Kids Church pool</Link>
@@ -144,9 +154,11 @@ export function ChildrenRoster({ roster }: Props) {
                     colSpan={ROSTER_HEADERS.length + 1}
                     className="px-4 py-10 text-center text-black/45"
                   >
-                    {visibleRoster.length === 0
-                      ? "No children registered yet. Use Register to add families."
-                      : "No matches for that search."}
+                    {loadFailed
+                      ? "The roster could not be loaded."
+                      : visibleRoster.length === 0
+                        ? "No children registered yet. Use Register to add families."
+                        : "No matches for that search."}
                   </td>
                 </tr>
               ) : (
