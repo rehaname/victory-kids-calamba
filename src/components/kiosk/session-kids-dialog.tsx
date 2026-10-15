@@ -43,7 +43,6 @@ export function SessionKidsDialog({ open, onOpenChange, session }: Props) {
   useEffect(() => {
     if (!open || !sessionId) return;
     let cancelled = false;
-    setLoadError(null);
     getSessionRosterAction(sessionId).then((result) => {
       if (cancelled) return;
       if (!result.ok) {

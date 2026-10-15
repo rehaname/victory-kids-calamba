@@ -118,8 +118,6 @@ export function KidsChurchPool({
     return () => {
       cancelled = true;
     };
-    // applyRoster is recreated each render and only writes state for this id.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
   const active = useMemo(() => {

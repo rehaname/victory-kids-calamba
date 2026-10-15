@@ -290,6 +290,13 @@ export async function listChildrenAction(): Promise<ListChildrenResult> {
  * Soft-delete a child from the roster. Blocks if they are currently checked in.
  * Does not delete attendance history or parent rows.
  */
+const ROSTER_CHILD_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isRosterChildUuid(value: string): boolean {
+  return ROSTER_CHILD_UUID_RE.test(value);
+}
+
 export async function deleteChildAction(childId: string) {
   try {
     await requireStaff();
@@ -307,6 +314,58 @@ export async function deleteChildAction(childId: string) {
     return {
       ok: false as const,
       error: errorMessage(err, "Could not remove child from roster."),
+    };
+  }
+}
+
+export async function deleteChildrenAction(childIds: string[]) {
+  try {
+    await requireStaff();
+    resolveDataSource();
+    if (!Array.isArray(childIds)) {
+      return { ok: false as const, error: "Select at least one child." };
+    }
+    const ids = [...new Set(childIds.map((id) => id.trim()).filter(Boolean))];
+    if (ids.length === 0) {
+      return { ok: false as const, error: "Select at least one child." };
+    }
+    if (ids.length > 1000) {
+      return { ok: false as const, error: "Select fewer children and try again." };
+    }
+    if (!ids.every(isRosterChildUuid)) {
+      return { ok: false as const, error: "Select at least one child." };
+    }
+    await getRepository().softDeleteChildren(ids);
+    refreshChildren();
+    refreshPool();
+    refreshHistory();
+    return { ok: true as const };
+  } catch (err) {
+    logServerError("deleteChildrenAction failed", err);
+    return {
+      ok: false as const,
+      error: errorMessage(err, "Could not remove children from roster."),
+    };
+  }
+}
+
+export async function deleteSessionAction(sessionId: string) {
+  try {
+    await requireStaff();
+    resolveDataSource();
+    const id = sessionId.trim();
+    if (!id || !isRosterChildUuid(id)) {
+      return { ok: false as const, error: "Missing session id." };
+    }
+    await getRepository().softDeleteSession(id);
+    refreshPool();
+    refreshHistory();
+    return { ok: true as const };
+  } catch (err) {
+    logServerError("deleteSessionAction failed", err);
+    return {
+      ok: false as const,
+      error: errorMessage(err, "Could not remove session."),
     };
   }
 }
@@ -414,7 +473,12 @@ export type SessionHistoryResult =
 export async function getSessionHistoryAction(sessionId: string): Promise<SessionHistoryResult> {
   try {
     await requireStaff();
-    return { ok: true, rows: await getRepository().listAttendanceForSession(sessionId) };
+    const repo = getRepository();
+    const session = await repo.getSession(sessionId);
+    if (!session) {
+      return { ok: false, error: "That session was removed." };
+    }
+    return { ok: true, rows: await repo.listAttendanceForSession(sessionId) };
   } catch (err) {
     logServerError("getSessionHistoryAction failed", err);
     return { ok: false, error: errorMessage(err, "Could not load history.") };

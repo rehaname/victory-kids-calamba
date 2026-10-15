@@ -30,6 +30,9 @@ export interface KidsRepository {
    * (any attendance with time_out null). Does not delete attendance or parents.
    */
   softDeleteChild(childId: string): Promise<void>;
+  /** All-or-nothing soft-delete for multiple roster children. */
+  softDeleteChildren(childIds: string[]): Promise<void>;
+  softDeleteSession(sessionId: string): Promise<void>;
 
   /**
    * Find active (non-deleted) children that look like duplicates of the

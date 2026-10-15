@@ -13,6 +13,7 @@ function session(sessionDate: string): Session {
     location: "Halang",
     serviceTime: "11am",
     sessionDate,
+    deletedAt: null,
   };
 }
 
