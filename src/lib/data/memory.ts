@@ -10,6 +10,7 @@ import {
   requireLocation,
   requireServiceTime,
 } from "@/lib/session";
+import { addPreviewAttendance } from "@/lib/staff-delete-confirm";
 import type {
   Attendance,
   AttendanceWithChild,
@@ -354,5 +355,25 @@ export const memoryRepository: KidsRepository = {
       .map(withChild)
       .filter((row): row is AttendanceWithChild => row !== null)
       .sort((a, b) => a.timeIn.localeCompare(b.timeIn));
+  },
+
+  async getChildrenDeletePreview(childIds) {
+    const visitCounts: Record<string, number> = {};
+    for (const id of childIds) visitCounts[id] = 0;
+
+    const wanted = new Set(childIds);
+    const checkedIn = new Set<string>();
+    addPreviewAttendance(
+      visitCounts,
+      checkedIn,
+      store()
+        .attendance.filter((row) => wanted.has(row.childId))
+        .map((row) => ({ childId: row.childId, timeOut: row.timeOut })),
+    );
+
+    return {
+      visitCounts,
+      checkedInChildIds: [...checkedIn],
+    };
   },
 };

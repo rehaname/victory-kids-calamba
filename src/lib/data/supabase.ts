@@ -12,6 +12,14 @@ import {
   requireLocation,
   requireServiceTime,
 } from "@/lib/session";
+import {
+  addPreviewAttendance,
+  chunkIds,
+  collectPreviewPages,
+  DELETE_PREVIEW_ID_CHUNK,
+  DELETE_PREVIEW_MAX_PAGES,
+  DELETE_PREVIEW_PAGE_SIZE,
+} from "@/lib/staff-delete-confirm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Attendance,
@@ -515,5 +523,40 @@ export const supabaseRepository: KidsRepository = {
     return ((data ?? []) as AttendanceRow[])
       .map(mapAttendance)
       .filter((row): row is AttendanceWithChild => row !== null);
+  },
+
+  async getChildrenDeletePreview(childIds) {
+    const unique = [...new Set(childIds)];
+    const visitCounts: Record<string, number> = {};
+    for (const id of unique) visitCounts[id] = 0;
+    const checkedIn = new Set<string>();
+    if (unique.length === 0) {
+      return { visitCounts, checkedInChildIds: [] };
+    }
+
+    const supabase = db();
+    for (const chunk of chunkIds(unique, DELETE_PREVIEW_ID_CHUNK)) {
+      const rows = await collectPreviewPages(async (from, to) => {
+        const { data, error } = await supabase
+          .from("attendance")
+          .select("child_id, time_out")
+          .in("child_id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to);
+        if (error) throwDb(error, "Could not load visit history");
+        return ((data ?? []) as { child_id: string; time_out: string | null }[]).map(
+          (row) => ({
+            childId: row.child_id,
+            timeOut: row.time_out,
+          }),
+        );
+      }, DELETE_PREVIEW_PAGE_SIZE, DELETE_PREVIEW_MAX_PAGES);
+      addPreviewAttendance(visitCounts, checkedIn, rows);
+    }
+
+    return {
+      visitCounts,
+      checkedInChildIds: [...checkedIn],
+    };
   },
 };

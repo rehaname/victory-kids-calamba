@@ -15,10 +15,21 @@ import {
   SESSION_EXPORT_HEADERS,
   sessionExportCells,
 } from "@/lib/csv";
-import { sessionDisplayName } from "@/lib/session";
+import {
+  createDeleteRunGuard,
+  runDeleteAtStep,
+  sessionDeleteFinalBody,
+  sessionDeleteFinalTitle,
+  sessionDeleteSummaryTitle,
+  sessionHasCheckedInKids,
+  type DeleteConfirmStep,
+} from "@/lib/staff-delete-confirm";
+import { formatSessionDate, sessionDisplayName } from "@/lib/session";
 import type { AttendanceWithChild, Session } from "@/lib/types";
 import { DatabaseStatusBanner } from "@/components/database-status-banner";
 import { KioskHeader } from "@/components/kiosk-header";
+import { TwoStepConfirmDialog } from "@/components/two-step-confirm-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
@@ -28,30 +39,6 @@ type Props = {
   missingEnv?: string[];
   dataSource?: "supabase" | "memory" | "error";
 };
-
-function buildSessionDeleteConfirm(
-  session: Session,
-  historyRows: AttendanceWithChild[],
-): string {
-  const lines: string[] = [`Delete ${sessionDisplayName(session)}?`];
-  const n = historyRows.length;
-  if (n === 0) {
-    lines.push("This session has no check-ins.");
-  } else {
-    lines.push(
-      `${n} check-in(s) will be hidden from History. Kids stay on the roster.`,
-    );
-    if (n <= 8) {
-      for (const row of historyRows) {
-        lines.push(`• ${row.child.firstName} ${row.child.lastName}`);
-      }
-    }
-    if (historyRows.some((row) => row.timeOut === null)) {
-      lines.push("Kids still checked in must be checked out first.");
-    }
-  }
-  return lines.join("\n");
-}
 
 export function HistoryModule({
   sessions,
@@ -63,7 +50,12 @@ export function HistoryModule({
   const [historySessionId, setHistorySessionId] = useState(sessions[0]?.id ?? "");
   const [removedSessionIds, setRemovedSessionIds] = useState<Set<string>>(() => new Set());
   const [deletingSession, setDeletingSession] = useState(false);
-  const deleteLock = useRef(false);
+  const deleteGuard = useRef(createDeleteRunGuard());
+  const deletingRef = useRef(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteStep, setDeleteStep] = useState<DeleteConfirmStep>(1);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !removedSessionIds.has(session.id)),
     [sessions, removedSessionIds],
@@ -85,7 +77,10 @@ export function HistoryModule({
   const historyReady =
     Boolean(activeSessionId) && loaded?.sessionId === activeSessionId && !loadError;
   const selectedSession = visibleSessions.find((s) => s.id === activeSessionId) ?? null;
-  const controlsDisabled = deletingSession || pending;
+  const controlsDisabled = deletingSession || pending || deleteOpen;
+
+  const blockContinue = sessionHasCheckedInKids(historyRows);
+  const checkInCount = historyRows.length;
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -125,40 +120,118 @@ export function HistoryModule({
     );
   }
 
-  async function handleDeleteSession() {
-    if (deleteLock.current || !historyReady || !selectedSession) return;
-    deleteLock.current = true;
-
-    const confirmed = window.confirm(
-      buildSessionDeleteConfirm(selectedSession, historyRows),
-    );
-    if (!confirmed) {
-      deleteLock.current = false;
-      return;
-    }
-
-    setDeletingSession(true);
-    const removedId = activeSessionId;
-    try {
-      const result = await deleteSessionAction(removedId);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      const remaining = visibleSessions.filter((s) => s.id !== removedId);
-      setRemovedSessionIds((prev) => new Set(prev).add(removedId));
-      setHistorySessionId(remaining[0]?.id ?? "");
-      setLoaded(null);
-      setLoadError(null);
-      toast.success("Session removed from History");
-      router.refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not remove session.");
-    } finally {
-      deleteLock.current = false;
-      setDeletingSession(false);
-    }
+  function openDeleteDialog() {
+    if (!historyReady || !selectedSession) return;
+    setDeleteStep(1);
+    setDeleteError(null);
+    setDeleteOpen(true);
   }
+
+  function closeDeleteDialog(force = false) {
+    if (!force && deletingRef.current) return;
+    setDeleteOpen(false);
+    setDeleteStep(1);
+    setDeleteError(null);
+  }
+
+  function handleContinueDelete() {
+    if (blockContinue) return;
+    setDeleteError(null);
+    setDeleteStep(2);
+  }
+
+  async function performSessionDelete() {
+    if (!selectedSession) return;
+    const removedId = activeSessionId;
+    const outcome = await runDeleteAtStep(deleteStep, deleteGuard.current, async () => {
+      deletingRef.current = true;
+      setDeletingSession(true);
+      try {
+        const result = await deleteSessionAction(removedId);
+        if (!result.ok) {
+          setDeleteError(result.error);
+          return;
+        }
+        const remaining = visibleSessions.filter((s) => s.id !== removedId);
+        setRemovedSessionIds((prev) => new Set(prev).add(removedId));
+        setHistorySessionId(remaining[0]?.id ?? "");
+        setLoaded(null);
+        setLoadError(null);
+        toast.success("Session removed from History");
+        router.refresh();
+        closeDeleteDialog(true);
+      } catch (err: unknown) {
+        setDeleteError(
+          err instanceof Error ? err.message : "Could not remove session.",
+        );
+      } finally {
+        deletingRef.current = false;
+        setDeletingSession(false);
+      }
+    });
+
+    if (outcome === "skipped-step" || outcome === "skipped-guard") return;
+  }
+
+  const sessionTimeRange = selectedSession
+    ? `${formatTime(selectedSession.startedAt)} – ${
+        selectedSession.endedAt ? formatTime(selectedSession.endedAt) : "still open"
+      }`
+    : "";
+
+  const summaryBody = selectedSession ? (
+    <div className="space-y-3 text-sm">
+      <dl className="space-y-2 rounded-lg border border-black/10 bg-black/[0.02] p-3">
+        <div>
+          <dt className="text-black/50">Session</dt>
+          <dd className="font-medium">{sessionDisplayName(selectedSession)}</dd>
+        </div>
+        <div>
+          <dt className="text-black/50">Date</dt>
+          <dd>{formatSessionDate(selectedSession.sessionDate)}</dd>
+        </div>
+        <div>
+          <dt className="text-black/50">Time</dt>
+          <dd>{sessionTimeRange}</dd>
+        </div>
+        <div>
+          <dt className="text-black/50">Status</dt>
+          <dd className="capitalize">{selectedSession.status}</dd>
+        </div>
+        <div>
+          <dt className="text-black/50">Check-ins in reports / CSV</dt>
+          <dd>
+            {checkInCount === 0
+              ? "None — session will disappear from History only."
+              : `${checkInCount} will no longer appear in reports or CSV exports.`}
+          </dd>
+        </div>
+      </dl>
+      <p className="text-black/60">
+        Kids stay on the roster. Individual check-in records are kept in the
+        database; they just won&apos;t show in History or exports after delete.
+      </p>
+      {checkInCount > 0 && checkInCount <= 8 ? (
+        <ul className="space-y-1 rounded-lg border border-black/10 p-2 text-black/70">
+          {historyRows.map((row) => (
+            <li key={row.id}>
+              • {row.child.firstName} {row.child.lastName}
+              {row.timeOut === null ? " (still checked in)" : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {blockContinue ? (
+        <Alert variant="destructive">
+          <AlertTitle>Check out first</AlertTitle>
+          <AlertDescription>
+            Kids still checked in must be checked out before this session can be
+            deleted.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  ) : null;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#e8f0ff_0%,_#ffffff_45%,_#f4f6f8_100%)] text-black">
@@ -218,7 +291,7 @@ export function HistoryModule({
               size="xl"
               disabled={!historyReady || controlsDisabled}
               className="shrink-0 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-              onClick={() => void handleDeleteSession()}
+              onClick={openDeleteDialog}
             >
               {deletingSession ? "Deleting…" : "Delete session"}
             </Button>
@@ -289,6 +362,27 @@ export function HistoryModule({
           </p>
         )}
       </main>
+
+      <TwoStepConfirmDialog
+        open={deleteOpen}
+        step={deleteStep}
+        deleting={deletingSession}
+        error={deleteError}
+        summaryTitle={sessionDeleteSummaryTitle()}
+        summaryBody={summaryBody}
+        finalTitle={sessionDeleteFinalTitle()}
+        finalDescription={sessionDeleteFinalBody(checkInCount)}
+        continueDisabled={blockContinue}
+        onOpenChange={(open) => {
+          if (!open) closeDeleteDialog();
+        }}
+        onContinue={handleContinueDelete}
+        onBack={() => {
+          setDeleteError(null);
+          setDeleteStep(1);
+        }}
+        onConfirmDelete={() => void performSessionDelete()}
+      />
     </div>
   );
 }

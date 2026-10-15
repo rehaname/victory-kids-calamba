@@ -4,16 +4,36 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { deleteChildAction, deleteChildrenAction } from "@/app/actions";
+import {
+  deleteChildAction,
+  deleteChildrenAction,
+  getChildrenDeletePreviewAction,
+} from "@/app/actions";
 import {
   downloadCsv,
   ROSTER_HEADERS,
   rosterCells,
 } from "@/lib/csv";
-import { formatBirthdayMdY, getAge } from "@/lib/age";
+import { childFullName, formatBirthdayMdY, getAge } from "@/lib/age";
 import type { ChildWithParent } from "@/lib/types";
+import {
+  advanceKidDeleteStep,
+  createDeleteRunGuard,
+  hiddenSelectedCount,
+  kidContinueDisabled,
+  kidDeleteFinalBody,
+  kidDeleteFinalTitle,
+  kidDeleteSummaryTitle,
+  runDeleteAtStep,
+  selectedKidsForDelete,
+  visitCountLabel,
+  type ChildrenDeletePreview,
+  type DeleteConfirmStep,
+} from "@/lib/staff-delete-confirm";
 import { DatabaseStatusBanner } from "@/components/database-status-banner";
 import { KioskHeader } from "@/components/kiosk-header";
+import { TwoStepConfirmDialog } from "@/components/two-step-confirm-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,44 +45,9 @@ type Props = {
   loadFailed?: boolean;
 };
 
-function rosterSort(a: ChildWithParent, b: ChildWithParent) {
-  return `${a.lastName}${a.firstName}`.localeCompare(`${b.lastName}${b.firstName}`);
-}
-
-function buildBulkDeleteConfirm(
-  selectedIds: Set<string>,
-  rows: ChildWithParent[],
-  rosterById: Map<string, ChildWithParent>,
-): string {
-  const n = selectedIds.size;
-  const rowIdSet = new Set(rows.map((c) => c.id));
-  const hiddenCount = [...selectedIds].filter((id) => !rowIdSet.has(id)).length;
-
-  const selectedChildren = [...selectedIds]
-    .map((id) => rosterById.get(id))
-    .filter((c): c is ChildWithParent => Boolean(c))
-    .sort(rosterSort);
-
-  const lines: string[] = [];
-
-  if (n === 1 && selectedChildren[0]) {
-    const child = selectedChildren[0];
-    lines.push(`Remove ${child.firstName} ${child.lastName} from the roster?`);
-  } else if (n >= 2 && n <= 8) {
-    lines.push(`Remove ${n} children from the roster?`);
-    for (const child of selectedChildren) {
-      lines.push(`• ${child.firstName} ${child.lastName}`);
-    }
-  } else {
-    lines.push(`Remove ${n} children from the roster?`);
-  }
-
-  if (hiddenCount > 0) {
-    lines.push(`Includes ${hiddenCount} not shown in the current search.`);
-  }
-  lines.push("Past check-ins stay in history.");
-  return lines.join("\n");
-}
+type KidDeleteTarget =
+  | { mode: "bulk"; ids: string[] }
+  | { mode: "single"; child: ChildWithParent };
 
 export function ChildrenRoster({
   roster,
@@ -75,9 +60,17 @@ export function ChildrenRoster({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const deleteLock = useRef(false);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
+
+  const [deleteTarget, setDeleteTarget] = useState<KidDeleteTarget | null>(null);
+  const [deleteStep, setDeleteStep] = useState<DeleteConfirmStep>(1);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [preview, setPreview] = useState<ChildrenDeletePreview | null>(null);
+  const deleteGuard = useRef(createDeleteRunGuard());
+  const deletingRef = useRef(false);
+  const previewRequest = useRef(0);
 
   const visibleRoster = useMemo(
     () => roster.filter((child) => !removedIds.has(child.id)),
@@ -120,7 +113,58 @@ export function ChildrenRoster({
     if (el) el.indeterminate = someShownSelected;
   }, [someShownSelected]);
 
-  const controlsDisabled = bulkDeleting || Boolean(deletingId);
+  const controlsDisabled =
+    bulkDeleting || Boolean(deletingId) || Boolean(deleteTarget);
+
+  const deleteIds = useMemo(() => {
+    if (!deleteTarget) return [];
+    if (deleteTarget.mode === "single") return [deleteTarget.child.id];
+    return deleteTarget.ids;
+  }, [deleteTarget]);
+
+  const deleteKids = useMemo(
+    () => selectedKidsForDelete(deleteIds, rosterById),
+    [deleteIds, rosterById],
+  );
+
+  const checkedInSet = useMemo(
+    () => new Set(preview?.checkedInChildIds ?? []),
+    [preview],
+  );
+
+  const previewReady = preview !== null && !previewLoading;
+  const blockContinue = previewReady && checkedInSet.size > 0;
+  const continueDisabled = kidContinueDisabled({
+    previewLoading,
+    previewReady,
+    checkedInCount: checkedInSet.size,
+  });
+
+  async function loadDeletePreview(ids: string[]) {
+    const requestId = ++previewRequest.current;
+    setPreviewLoading(true);
+    setPreview(null);
+    setDeleteError(null);
+    try {
+      const result = await getChildrenDeletePreviewAction(ids);
+      if (requestId !== previewRequest.current) return;
+      if (!result.ok) {
+        setDeleteError(result.error);
+        return;
+      }
+      setPreview({
+        visitCounts: result.visitCounts,
+        checkedInChildIds: result.checkedInChildIds,
+      });
+    } catch (err: unknown) {
+      if (requestId !== previewRequest.current) return;
+      setDeleteError(
+        err instanceof Error ? err.message : "Could not load delete summary.",
+      );
+    } finally {
+      if (requestId === previewRequest.current) setPreviewLoading(false);
+    }
+  }
 
   function exportRoster() {
     downloadCsv(
@@ -151,91 +195,167 @@ export function ChildrenRoster({
     });
   }
 
-  async function handleBulkDelete() {
-    if (deleteLock.current || selectedIds.size === 0) return;
-    deleteLock.current = true;
-
-    const confirmed = window.confirm(
-      buildBulkDeleteConfirm(selectedIds, rows, rosterById),
-    );
-    if (!confirmed) {
-      deleteLock.current = false;
-      return;
-    }
-
-    setBulkDeleting(true);
+  function openBulkDeleteDialog() {
+    if (selectedIds.size === 0) return;
     const ids = [...selectedIds];
-    try {
-      const result = await deleteChildrenAction(ids);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      setRemovedIds((prev) => {
-        const next = new Set(prev);
-        for (const id of ids) next.add(id);
-        return next;
-      });
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        for (const id of ids) next.delete(id);
-        return next;
-      });
-      if (ids.length === 1) {
-        const child = rosterById.get(ids[0]!);
-        toast.success(
-          child
-            ? `${child.firstName} ${child.lastName} removed from roster`
-            : "1 removed from roster",
-        );
-      } else {
-        toast.success(`${ids.length} removed from roster`);
-      }
-      router.refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not remove children.");
-    } finally {
-      deleteLock.current = false;
-      setBulkDeleting(false);
-    }
+    setDeleteStep(1);
+    setDeleteError(null);
+    setDeleteTarget({ mode: "bulk", ids });
+    void loadDeletePreview(ids);
   }
 
-  async function handleDelete(child: ChildWithParent) {
-    if (deleteLock.current) return;
-    deleteLock.current = true;
+  function openSingleDeleteDialog(child: ChildWithParent) {
+    setDeleteStep(1);
+    setDeleteError(null);
+    setDeleteTarget({ mode: "single", child });
+    void loadDeletePreview([child.id]);
+  }
 
-    const confirmed = window.confirm(
-      `Remove ${child.firstName} ${child.lastName} from the roster? Past check-ins stay in history.`,
-    );
-    if (!confirmed) {
-      deleteLock.current = false;
-      return;
-    }
+  function closeDeleteDialog(force = false) {
+    if (!force && deletingRef.current) return;
+    previewRequest.current += 1;
+    setDeleteTarget(null);
+    setDeleteStep(1);
+    setDeleteError(null);
+    setPreview(null);
+    setPreviewLoading(false);
+  }
 
-    setDeletingId(child.id);
-    try {
-      const result = await deleteChildAction(child.id);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
+  function handleContinueDelete() {
+    if (continueDisabled) return;
+    setDeleteError(null);
+    setDeleteStep((step) => advanceKidDeleteStep(step, blockContinue));
+  }
+
+  async function performKidDelete() {
+    const mode = deleteTarget?.mode;
+    const ids = deleteIds;
+    const outcome = await runDeleteAtStep(deleteStep, deleteGuard.current, async () => {
+      if (!mode || ids.length === 0) return;
+
+      deletingRef.current = true;
+      if (mode === "single") setDeletingId(ids[0]!);
+      else setBulkDeleting(true);
+
+      try {
+        const result =
+          mode === "single"
+            ? await deleteChildAction(ids[0]!)
+            : await deleteChildrenAction(ids);
+        if (!result.ok) {
+          setDeleteError(result.error);
+          return;
+        }
+        setRemovedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ids) next.add(id);
+          return next;
+        });
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ids) next.delete(id);
+          return next;
+        });
+        const named =
+          mode === "single" && deleteTarget?.mode === "single"
+            ? deleteTarget.child
+            : rosterById.get(ids[0]!);
+        if (ids.length === 1) {
+          toast.success(
+            named
+              ? `${named.firstName} ${named.lastName} removed from roster`
+              : "1 removed from roster",
+          );
+        } else {
+          toast.success(`${ids.length} removed from roster`);
+        }
+        router.refresh();
+        closeDeleteDialog(true);
+      } catch (err: unknown) {
+        setDeleteError(
+          err instanceof Error
+            ? err.message
+            : mode === "single"
+              ? "Could not remove child."
+              : "Could not remove children.",
+        );
+      } finally {
+        deletingRef.current = false;
+        setDeletingId(null);
+        setBulkDeleting(false);
       }
-      setRemovedIds((prev) => new Set(prev).add(child.id));
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(child.id);
-        return next;
-      });
-      toast.success(`${child.firstName} ${child.lastName} removed from roster`);
-      router.refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not remove child.");
-    } finally {
-      deleteLock.current = false;
-      setDeletingId(null);
-    }
+    });
+
+    if (outcome === "skipped-step" || outcome === "skipped-guard") return;
   }
 
   const selectedCount = selectedIds.size;
+  const deleteCount = deleteIds.length;
+  const hiddenCount =
+    deleteTarget?.mode === "bulk"
+      ? hiddenSelectedCount(new Set(deleteTarget.ids), new Set(shownIds))
+      : 0;
+
+  const summaryBody = (
+    <div className="space-y-3 text-sm">
+      <p className="text-black/70">
+        {deleteCount === 1
+          ? "This removes the child from the roster. Past check-ins stay in history."
+          : `This removes ${deleteCount} children from the roster. Past check-ins stay in history.`}
+      </p>
+      {hiddenCount > 0 ? (
+        <p className="text-black/55">
+          Includes {hiddenCount} not shown in the current search.
+        </p>
+      ) : null}
+      {previewLoading ? (
+        <div className="space-y-2" aria-busy="true" aria-label="Loading delete summary">
+          {Array.from({ length: Math.min(deleteCount, 4) }).map((_, i) => (
+            <div key={i} className="h-14 animate-pulse rounded-lg bg-black/5" />
+          ))}
+        </div>
+      ) : (
+        <ul className="space-y-2 rounded-lg border border-black/10 p-2">
+          {deleteKids.map((child) => {
+            const checkedIn = checkedInSet.has(child.id);
+            return (
+              <li
+                key={child.id}
+                className={`rounded-md px-2 py-2 ${checkedIn ? "bg-amber-50 ring-1 ring-amber-200" : "bg-black/[0.02]"}`}
+              >
+                <p className="font-medium">
+                  {childFullName(child.firstName, child.lastName)}
+                </p>
+                <p className="text-black/60">
+                  Age {getAge(child.birthday)} · {formatBirthdayMdY(child.birthday)}
+                  {child.parent.fullName ? ` · ${child.parent.fullName}` : ""}
+                </p>
+                <p className="text-black/50">
+                  {preview
+                    ? visitCountLabel(preview.visitCounts[child.id] ?? 0)
+                    : "Visit history could not be loaded."}
+                </p>
+                {checkedIn ? (
+                  <p className="mt-1 font-medium text-amber-900">
+                    Currently checked in — check out before deleting.
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {blockContinue && !previewLoading ? (
+        <Alert variant="destructive">
+          <AlertTitle>Check out first</AlertTitle>
+          <AlertDescription>
+            One or more selected kids are still checked in. Delete is blocked until
+            they are checked out.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#e8f0ff_0%,_#ffffff_45%,_#f4f6f8_100%)] text-black">
@@ -258,7 +378,7 @@ export function ChildrenRoster({
             variant="outline"
             disabled={selectedCount === 0 || controlsDisabled}
             className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-            onClick={() => void handleBulkDelete()}
+            onClick={openBulkDeleteDialog}
           >
             {bulkDeleting
               ? "Deleting…"
@@ -287,8 +407,8 @@ export function ChildrenRoster({
             id="roster-search"
             className="h-14 text-base"
             placeholder="Name, nickname, parent, address, or contact…"
-            value={query}
             disabled={controlsDisabled}
+            value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
@@ -367,7 +487,7 @@ export function ChildrenRoster({
                           size="sm"
                           disabled={controlsDisabled}
                           className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                          onClick={() => void handleDelete(child)}
+                          onClick={() => openSingleDeleteDialog(child)}
                         >
                           {busy ? "Deleting…" : "Delete"}
                         </Button>
@@ -380,6 +500,28 @@ export function ChildrenRoster({
           </table>
         </div>
       </main>
+
+      <TwoStepConfirmDialog
+        open={Boolean(deleteTarget)}
+        step={deleteStep}
+        deleting={bulkDeleting || Boolean(deletingId)}
+        error={deleteError}
+        summaryTitle={kidDeleteSummaryTitle(deleteCount)}
+        summaryBody={summaryBody}
+        finalTitle={kidDeleteFinalTitle(deleteCount)}
+        finalDescription={kidDeleteFinalBody(deleteCount)}
+        continueDisabled={continueDisabled}
+        errorTitle={previewReady ? "Could not delete" : "Could not load summary"}
+        onOpenChange={(open) => {
+          if (!open) closeDeleteDialog();
+        }}
+        onContinue={handleContinueDelete}
+        onBack={() => {
+          setDeleteError(null);
+          setDeleteStep(1);
+        }}
+        onConfirmDelete={() => void performKidDelete()}
+      />
     </div>
   );
 }

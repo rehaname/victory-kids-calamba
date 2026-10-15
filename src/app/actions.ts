@@ -9,6 +9,7 @@ import { formatDuplicateBlockMessage } from "@/lib/child-duplicates";
 import { errorMessage, logServerError } from "@/lib/errors";
 import { kioskDuplicateResult } from "@/lib/kiosk-public";
 import { toKioskChildHit } from "@/lib/kiosk-search";
+import { parseDeleteChildIds } from "@/lib/staff-delete-confirm";
 import { localDemoPin } from "@/lib/staff-pin-local";
 import { grantStaffSession, requireStaff, StaffAuthError } from "@/lib/staff-session";
 import {
@@ -314,6 +315,33 @@ export async function deleteChildAction(childId: string) {
     return {
       ok: false as const,
       error: errorMessage(err, "Could not remove child from roster."),
+    };
+  }
+}
+
+export type ChildrenDeletePreviewResult =
+  | {
+      ok: true;
+      visitCounts: Record<string, number>;
+      checkedInChildIds: string[];
+    }
+  | { ok: false; error: string };
+
+export async function getChildrenDeletePreviewAction(
+  childIds: string[],
+): Promise<ChildrenDeletePreviewResult> {
+  try {
+    await requireStaff();
+    resolveDataSource();
+    const parsed = parseDeleteChildIds(childIds);
+    if (!parsed.ok) return parsed;
+    const preview = await getRepository().getChildrenDeletePreview(parsed.ids);
+    return { ok: true, ...preview };
+  } catch (err) {
+    logServerError("getChildrenDeletePreviewAction failed", err);
+    return {
+      ok: false,
+      error: errorMessage(err, "Could not load delete summary."),
     };
   }
 }
