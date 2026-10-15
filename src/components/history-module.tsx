@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { deleteSessionAction, getSessionHistoryAction } from "@/app/actions";
 import {
@@ -61,8 +61,13 @@ export function HistoryModule({
 }: Props) {
   const router = useRouter();
   const [historySessionId, setHistorySessionId] = useState(sessions[0]?.id ?? "");
+  const [removedSessionIds, setRemovedSessionIds] = useState<Set<string>>(() => new Set());
   const [deletingSession, setDeletingSession] = useState(false);
   const deleteLock = useRef(false);
+  const visibleSessions = useMemo(
+    () => sessions.filter((session) => !removedSessionIds.has(session.id)),
+    [sessions, removedSessionIds],
+  );
   /** Tagged with the session it belongs to, so a switch never shows stale rows. */
   const [loaded, setLoaded] = useState<{
     sessionId: string;
@@ -71,13 +76,15 @@ export function HistoryModule({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const activeSessionId =
-    historySessionId && sessions.some((s) => s.id === historySessionId)
+    historySessionId && visibleSessions.some((s) => s.id === historySessionId)
       ? historySessionId
-      : (sessions[0]?.id ?? "");
+      : (visibleSessions[0]?.id ?? "");
 
   const historyRows = loaded?.sessionId === activeSessionId ? loaded.rows : [];
   const pending = Boolean(activeSessionId) && loaded?.sessionId !== activeSessionId;
-  const selectedSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+  const historyReady =
+    Boolean(activeSessionId) && loaded?.sessionId === activeSessionId && !loadError;
+  const selectedSession = visibleSessions.find((s) => s.id === activeSessionId) ?? null;
   const controlsDisabled = deletingSession || pending;
 
   useEffect(() => {
@@ -107,7 +114,7 @@ export function HistoryModule({
   }, [activeSessionId]);
 
   function exportSession() {
-    const selected = sessions.find((s) => s.id === activeSessionId);
+    const selected = visibleSessions.find((s) => s.id === activeSessionId);
     const stamp = selected
       ? sessionDisplayName(selected).replace(/[^a-zA-Z0-9]+/g, "-")
       : activeSessionId;
@@ -119,7 +126,7 @@ export function HistoryModule({
   }
 
   async function handleDeleteSession() {
-    if (deleteLock.current || !activeSessionId || !selectedSession) return;
+    if (deleteLock.current || !historyReady || !selectedSession) return;
     deleteLock.current = true;
 
     const confirmed = window.confirm(
@@ -138,7 +145,8 @@ export function HistoryModule({
         toast.error(result.error);
         return;
       }
-      const remaining = sessions.filter((s) => s.id !== removedId);
+      const remaining = visibleSessions.filter((s) => s.id !== removedId);
+      setRemovedSessionIds((prev) => new Set(prev).add(removedId));
       setHistorySessionId(remaining[0]?.id ?? "");
       setLoaded(null);
       setLoadError(null);
@@ -193,12 +201,12 @@ export function HistoryModule({
               disabled={controlsDisabled}
               onChange={(e) => setHistorySessionId(e.target.value)}
             >
-              {sessions.length === 0 && (
+              {visibleSessions.length === 0 && (
                 <option value="">
                   {dataSource === "error" ? "Could not load sessions" : "No sessions yet"}
                 </option>
               )}
-              {sessions.map((s) => (
+              {visibleSessions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {sessionDisplayName(s)} · {s.status}
                 </option>
@@ -208,7 +216,7 @@ export function HistoryModule({
               type="button"
               variant="outline"
               size="xl"
-              disabled={!activeSessionId || controlsDisabled}
+              disabled={!historyReady || controlsDisabled}
               className="shrink-0 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
               onClick={() => void handleDeleteSession()}
             >

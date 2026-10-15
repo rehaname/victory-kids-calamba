@@ -320,3 +320,29 @@ test("memory softDeleteSession rejects already removed session", async () => {
     /already removed/,
   );
 });
+
+test("memory checkIn rejects a removed session or a removed child", async () => {
+  resetStore();
+  const { children } = await registerTwoChildren();
+  const removed = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+  await memoryRepository.softDeleteSession(removed.id);
+  await assert.rejects(
+    () => memoryRepository.checkIn(removed.id, children[0]!.id),
+    /No open session/,
+  );
+
+  const open = await memoryRepository.startSession({
+    serviceTime: "11am",
+    location: "Halang",
+  });
+  await memoryRepository.softDeleteChild(children[0]!.id);
+  await assert.rejects(
+    () => memoryRepository.checkIn(open.id, children[0]!.id),
+    /removed from the roster/,
+  );
+  await memoryRepository.checkIn(open.id, children[1]!.id);
+  assert.equal((await memoryRepository.listActiveAttendance(open.id)).length, 1);
+});

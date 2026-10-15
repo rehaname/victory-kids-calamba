@@ -208,13 +208,14 @@ export const memoryRepository: KidsRepository = {
     }
 
     const stamp = now();
-    for (const childId of childIds) {
+    const targets = childIds.map((childId) => {
       const child = children.find((c) => c.id === childId);
       if (!child || child.deletedAt) {
         throw new Error("Some selected children changed. Refresh and try again.");
       }
-      child.deletedAt = stamp;
-    }
+      return child;
+    });
+    for (const child of targets) child.deletedAt = stamp;
   },
 
   async softDeleteSession(sessionId) {

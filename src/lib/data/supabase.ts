@@ -316,113 +316,21 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async softDeleteChildren(childIds) {
-    const supabase = db();
-    const { data: childRows, error: childError } = await supabase
-      .from("children")
-      .select("id, first_name, last_name, deleted_at")
-      .in("id", childIds);
-    if (childError) throwDb(childError, "Could not load children");
-    const rows = (childRows ?? []) as {
-      id: string;
-      first_name: string;
-      last_name: string;
-      deleted_at: string | null;
-    }[];
-    if (rows.length !== childIds.length || rows.some((r) => r.deleted_at)) {
-      throw new Error(
-        "Some selected children are no longer on the roster. Nothing was removed.",
-      );
-    }
-
-    const { data: activeRows, error: activeError } = await supabase
-      .from("attendance")
-      .select("child_id")
-      .in("child_id", childIds)
-      .is("time_out", null);
-    if (activeError) throwDb(activeError, "Could not check attendance");
-    const activeChildIds = [
-      ...new Set(
-        ((activeRows ?? []) as { child_id: string }[]).map((r) => r.child_id),
-      ),
-    ];
-    if (activeChildIds.length > 0) {
-      const byId = new Map(rows.map((r) => [r.id, r]));
-      const names = activeChildIds
-        .map((id) => byId.get(id))
-        .filter(Boolean)
-        .map((r) => `${r!.first_name} ${r!.last_name}`);
-      const shown = names.slice(0, 8);
-      const rest = names.length - shown.length;
-      const list =
-        rest > 0
-          ? `${shown.join(", ")}, and ${rest} others`
-          : shown.join(", ");
-      throw new Error(
-        `Check out first before removing: ${list}. Nothing was removed.`,
-      );
-    }
-
-    const deletedAt = new Date().toISOString();
-    const { data: updated, error: updateError } = await supabase
-      .from("children")
-      .update({ deleted_at: deletedAt })
-      .in("id", childIds)
-      .is("deleted_at", null)
-      .select("id");
-    if (updateError) throwDb(updateError, "Could not remove children from roster");
-    if ((updated ?? []).length !== childIds.length) {
-      throw new Error("Some selected children changed. Refresh and try again.");
-    }
+    // One transaction: lock every child, refuse if any are missing, already
+    // removed, or checked in, then stamp deleted_at. See 08_sessions_deleted_at.sql.
+    const { error } = await db().rpc("soft_delete_children", {
+      child_ids: childIds,
+    });
+    if (error) throwDb(error, "Could not remove children from roster");
   },
 
   async softDeleteSession(sessionId) {
-    const supabase = db();
-    const { data: sessionRow, error: sessionError } = await supabase
-      .from("sessions")
-      .select("id, status, deleted_at")
-      .eq("id", sessionId)
-      .maybeSingle();
-    if (sessionError) throwDb(sessionError, "Could not load session");
-    if (!sessionRow) throw new Error("Session not found");
-    const session = sessionRow as {
-      id: string;
-      status: "open" | "closed";
-      deleted_at: string | null;
-    };
-    if (session.deleted_at) {
-      throw new Error("That session is already removed.");
-    }
-
-    const { count, error: countError } = await supabase
-      .from("attendance")
-      .select("id", { count: "exact", head: true })
-      .eq("session_id", sessionId)
-      .is("time_out", null);
-    if (countError) throwDb(countError, "Could not check attendance");
-    const stillIn = count ?? 0;
-    if (stillIn > 0) {
-      throw new Error(
-        `${stillIn} child(ren) still checked in. Check them out before deleting this session.`,
-      );
-    }
-
-    const deletedAt = new Date().toISOString();
-    const patch: {
-      deleted_at: string;
-      status?: "closed";
-      ended_at?: string;
-    } = { deleted_at: deletedAt };
-    if (session.status === "open") {
-      patch.status = "closed";
-      patch.ended_at = deletedAt;
-    }
-
-    const { error: updateError } = await supabase
-      .from("sessions")
-      .update(patch)
-      .eq("id", sessionId)
-      .is("deleted_at", null);
-    if (updateError) throwDb(updateError, "Could not remove session");
+    // Locks the session, blocks while time_out is null, and closes an open
+    // session in the same update. See 08_sessions_deleted_at.sql.
+    const { error } = await db().rpc("soft_delete_session", {
+      session_id: sessionId,
+    });
+    if (error) throwDb(error, "Could not remove session");
   },
 
   async findLikelyDuplicates(children: ChildIdentity[]) {
