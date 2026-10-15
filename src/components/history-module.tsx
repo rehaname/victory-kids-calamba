@@ -51,6 +51,7 @@ export function HistoryModule({
   const [removedSessionIds, setRemovedSessionIds] = useState<Set<string>>(() => new Set());
   const [deletingSession, setDeletingSession] = useState(false);
   const deleteGuard = useRef(createDeleteRunGuard());
+  const deletingRef = useRef(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteStep, setDeleteStep] = useState<DeleteConfirmStep>(1);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -126,8 +127,8 @@ export function HistoryModule({
     setDeleteOpen(true);
   }
 
-  function closeDeleteDialog() {
-    if (deletingSession) return;
+  function closeDeleteDialog(force = false) {
+    if (!force && deletingRef.current) return;
     setDeleteOpen(false);
     setDeleteStep(1);
     setDeleteError(null);
@@ -143,25 +144,33 @@ export function HistoryModule({
     if (!selectedSession) return;
     const removedId = activeSessionId;
     const outcome = await runDeleteAtStep(deleteStep, deleteGuard.current, async () => {
+      deletingRef.current = true;
       setDeletingSession(true);
-      const result = await deleteSessionAction(removedId);
-      if (!result.ok) {
-        setDeleteError(result.error);
-        return;
+      try {
+        const result = await deleteSessionAction(removedId);
+        if (!result.ok) {
+          setDeleteError(result.error);
+          return;
+        }
+        const remaining = visibleSessions.filter((s) => s.id !== removedId);
+        setRemovedSessionIds((prev) => new Set(prev).add(removedId));
+        setHistorySessionId(remaining[0]?.id ?? "");
+        setLoaded(null);
+        setLoadError(null);
+        toast.success("Session removed from History");
+        router.refresh();
+        closeDeleteDialog(true);
+      } catch (err: unknown) {
+        setDeleteError(
+          err instanceof Error ? err.message : "Could not remove session.",
+        );
+      } finally {
+        deletingRef.current = false;
+        setDeletingSession(false);
       }
-      const remaining = visibleSessions.filter((s) => s.id !== removedId);
-      setRemovedSessionIds((prev) => new Set(prev).add(removedId));
-      setHistorySessionId(remaining[0]?.id ?? "");
-      setLoaded(null);
-      setLoadError(null);
-      toast.success("Session removed from History");
-      router.refresh();
-      setDeleteOpen(false);
-      setDeleteStep(1);
     });
 
     if (outcome === "skipped-step" || outcome === "skipped-guard") return;
-    setDeletingSession(false);
   }
 
   const sessionTimeRange = selectedSession
@@ -199,11 +208,11 @@ export function HistoryModule({
         </div>
       </dl>
       <p className="text-black/60">
-        Individual check-in records are kept in the database; they just won&apos;t
-        show in History or exports after delete.
+        Kids stay on the roster. Individual check-in records are kept in the
+        database; they just won&apos;t show in History or exports after delete.
       </p>
       {checkInCount > 0 && checkInCount <= 8 ? (
-        <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-black/10 p-2 text-black/70">
+        <ul className="space-y-1 rounded-lg border border-black/10 p-2 text-black/70">
           {historyRows.map((row) => (
             <li key={row.id}>
               • {row.child.firstName} {row.child.lastName}

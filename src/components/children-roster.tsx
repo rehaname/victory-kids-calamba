@@ -20,6 +20,7 @@ import {
   advanceKidDeleteStep,
   createDeleteRunGuard,
   hiddenSelectedCount,
+  kidContinueDisabled,
   kidDeleteFinalBody,
   kidDeleteFinalTitle,
   kidDeleteSummaryTitle,
@@ -68,6 +69,8 @@ export function ChildrenRoster({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [preview, setPreview] = useState<ChildrenDeletePreview | null>(null);
   const deleteGuard = useRef(createDeleteRunGuard());
+  const deletingRef = useRef(false);
+  const previewRequest = useRef(0);
 
   const visibleRoster = useMemo(
     () => roster.filter((child) => !removedIds.has(child.id)),
@@ -129,17 +132,24 @@ export function ChildrenRoster({
     [preview],
   );
 
-  const blockContinue = checkedInSet.size > 0;
+  const previewReady = preview !== null && !previewLoading;
+  const blockContinue = previewReady && checkedInSet.size > 0;
+  const continueDisabled = kidContinueDisabled({
+    previewLoading,
+    previewReady,
+    checkedInCount: checkedInSet.size,
+  });
 
   async function loadDeletePreview(ids: string[]) {
+    const requestId = ++previewRequest.current;
     setPreviewLoading(true);
     setPreview(null);
     setDeleteError(null);
     try {
       const result = await getChildrenDeletePreviewAction(ids);
+      if (requestId !== previewRequest.current) return;
       if (!result.ok) {
         setDeleteError(result.error);
-        setPreview({ visitCounts: {}, checkedInChildIds: [] });
         return;
       }
       setPreview({
@@ -147,12 +157,12 @@ export function ChildrenRoster({
         checkedInChildIds: result.checkedInChildIds,
       });
     } catch (err: unknown) {
+      if (requestId !== previewRequest.current) return;
       setDeleteError(
         err instanceof Error ? err.message : "Could not load delete summary.",
       );
-      setPreview({ visitCounts: {}, checkedInChildIds: [] });
     } finally {
-      setPreviewLoading(false);
+      if (requestId === previewRequest.current) setPreviewLoading(false);
     }
   }
 
@@ -201,46 +211,37 @@ export function ChildrenRoster({
     void loadDeletePreview([child.id]);
   }
 
-  function closeDeleteDialog() {
-    if (bulkDeleting || deletingId) return;
+  function closeDeleteDialog(force = false) {
+    if (!force && deletingRef.current) return;
+    previewRequest.current += 1;
     setDeleteTarget(null);
     setDeleteStep(1);
     setDeleteError(null);
     setPreview(null);
+    setPreviewLoading(false);
   }
 
   function handleContinueDelete() {
+    if (continueDisabled) return;
     setDeleteError(null);
     setDeleteStep((step) => advanceKidDeleteStep(step, blockContinue));
   }
 
   async function performKidDelete() {
+    const mode = deleteTarget?.mode;
+    const ids = deleteIds;
     const outcome = await runDeleteAtStep(deleteStep, deleteGuard.current, async () => {
-      const ids = deleteIds;
-      if (ids.length === 0) return;
+      if (!mode || ids.length === 0) return;
 
-      if (ids.length === 1) {
-        setDeletingId(ids[0]!);
-        const result = await deleteChildAction(ids[0]!);
-        if (!result.ok) {
-          setDeleteError(result.error);
-          return;
-        }
-        setRemovedIds((prev) => new Set(prev).add(ids[0]!));
-        setSelectedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(ids[0]!);
-          return next;
-        });
-        const child = rosterById.get(ids[0]!);
-        toast.success(
-          child
-            ? `${child.firstName} ${child.lastName} removed from roster`
-            : "Removed from roster",
-        );
-      } else {
-        setBulkDeleting(true);
-        const result = await deleteChildrenAction(ids);
+      deletingRef.current = true;
+      if (mode === "single") setDeletingId(ids[0]!);
+      else setBulkDeleting(true);
+
+      try {
+        const result =
+          mode === "single"
+            ? await deleteChildAction(ids[0]!)
+            : await deleteChildrenAction(ids);
         if (!result.ok) {
           setDeleteError(result.error);
           return;
@@ -255,16 +256,37 @@ export function ChildrenRoster({
           for (const id of ids) next.delete(id);
           return next;
         });
-        toast.success(`${ids.length} removed from roster`);
+        const named =
+          mode === "single" && deleteTarget?.mode === "single"
+            ? deleteTarget.child
+            : rosterById.get(ids[0]!);
+        if (ids.length === 1) {
+          toast.success(
+            named
+              ? `${named.firstName} ${named.lastName} removed from roster`
+              : "1 removed from roster",
+          );
+        } else {
+          toast.success(`${ids.length} removed from roster`);
+        }
+        router.refresh();
+        closeDeleteDialog(true);
+      } catch (err: unknown) {
+        setDeleteError(
+          err instanceof Error
+            ? err.message
+            : mode === "single"
+              ? "Could not remove child."
+              : "Could not remove children.",
+        );
+      } finally {
+        deletingRef.current = false;
+        setDeletingId(null);
+        setBulkDeleting(false);
       }
-      router.refresh();
-      closeDeleteDialog();
     });
 
     if (outcome === "skipped-step" || outcome === "skipped-guard") return;
-
-    setDeletingId(null);
-    setBulkDeleting(false);
   }
 
   const selectedCount = selectedIds.size;
@@ -293,9 +315,8 @@ export function ChildrenRoster({
           ))}
         </div>
       ) : (
-        <ul className="max-h-52 space-y-2 overflow-y-auto rounded-lg border border-black/10 p-2">
+        <ul className="space-y-2 rounded-lg border border-black/10 p-2">
           {deleteKids.map((child) => {
-            const visits = preview?.visitCounts[child.id] ?? 0;
             const checkedIn = checkedInSet.has(child.id);
             return (
               <li
@@ -309,7 +330,11 @@ export function ChildrenRoster({
                   Age {getAge(child.birthday)} · {formatBirthdayMdY(child.birthday)}
                   {child.parent.fullName ? ` · ${child.parent.fullName}` : ""}
                 </p>
-                <p className="text-black/50">{visitCountLabel(visits)}</p>
+                <p className="text-black/50">
+                  {preview
+                    ? visitCountLabel(preview.visitCounts[child.id] ?? 0)
+                    : "Visit history could not be loaded."}
+                </p>
                 {checkedIn ? (
                   <p className="mt-1 font-medium text-amber-900">
                     Currently checked in — check out before deleting.
@@ -485,7 +510,8 @@ export function ChildrenRoster({
         summaryBody={summaryBody}
         finalTitle={kidDeleteFinalTitle(deleteCount)}
         finalDescription={kidDeleteFinalBody(deleteCount)}
-        continueDisabled={blockContinue || previewLoading}
+        continueDisabled={continueDisabled}
+        errorTitle={previewReady ? "Could not delete" : "Could not load summary"}
         onOpenChange={(open) => {
           if (!open) closeDeleteDialog();
         }}

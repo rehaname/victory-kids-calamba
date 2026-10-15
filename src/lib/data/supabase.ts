@@ -12,6 +12,14 @@ import {
   requireLocation,
   requireServiceTime,
 } from "@/lib/session";
+import {
+  addPreviewAttendance,
+  chunkIds,
+  collectPreviewPages,
+  DELETE_PREVIEW_ID_CHUNK,
+  DELETE_PREVIEW_MAX_PAGES,
+  DELETE_PREVIEW_PAGE_SIZE,
+} from "@/lib/staff-delete-confirm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Attendance,
@@ -518,26 +526,32 @@ export const supabaseRepository: KidsRepository = {
   },
 
   async getChildrenDeletePreview(childIds) {
+    const unique = [...new Set(childIds)];
     const visitCounts: Record<string, number> = {};
-    for (const id of childIds) visitCounts[id] = 0;
-    if (childIds.length === 0) {
+    for (const id of unique) visitCounts[id] = 0;
+    const checkedIn = new Set<string>();
+    if (unique.length === 0) {
       return { visitCounts, checkedInChildIds: [] };
     }
 
     const supabase = db();
-    const { data, error } = await supabase
-      .from("attendance")
-      .select("child_id, time_out")
-      .in("child_id", childIds);
-    if (error) throwDb(error, "Could not load visit history");
-
-    const checkedIn = new Set<string>();
-    for (const row of data ?? []) {
-      const childId = (row as { child_id: string; time_out: string | null }).child_id;
-      visitCounts[childId] = (visitCounts[childId] ?? 0) + 1;
-      if ((row as { time_out: string | null }).time_out === null) {
-        checkedIn.add(childId);
-      }
+    for (const chunk of chunkIds(unique, DELETE_PREVIEW_ID_CHUNK)) {
+      const rows = await collectPreviewPages(async (from, to) => {
+        const { data, error } = await supabase
+          .from("attendance")
+          .select("child_id, time_out")
+          .in("child_id", chunk)
+          .order("id", { ascending: true })
+          .range(from, to);
+        if (error) throwDb(error, "Could not load visit history");
+        return ((data ?? []) as { child_id: string; time_out: string | null }[]).map(
+          (row) => ({
+            childId: row.child_id,
+            timeOut: row.time_out,
+          }),
+        );
+      }, DELETE_PREVIEW_PAGE_SIZE, DELETE_PREVIEW_MAX_PAGES);
+      addPreviewAttendance(visitCounts, checkedIn, rows);
     }
 
     return {

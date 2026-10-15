@@ -2,10 +2,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChildWithParent } from "@/lib/types";
 import {
+  addPreviewAttendance,
   advanceKidDeleteStep,
+  chunkIds,
+  collectPreviewPages,
   createDeleteRunGuard,
+  DELETE_PREVIEW_ID_CHUNK,
+  DELETE_PREVIEW_MAX_IDS,
+  kidContinueDisabled,
   kidDeleteFinalBody,
   kidDeleteSummaryTitle,
+  parseDeleteChildIds,
   runDeleteAtStep,
   selectedKidsForDelete,
   shouldInvokeDelete,
@@ -75,6 +82,109 @@ test("delete run guard allows only one in-flight delete", () => {
   assert.equal(guard.tryBegin(), false);
   guard.end();
   assert.equal(guard.tryBegin(), true);
+});
+
+const SAMPLE_UUID = "11111111-1111-4111-8111-111111111111";
+const OTHER_UUID = "22222222-2222-4222-8222-222222222222";
+
+test("kid continue is disabled while preview is loading, failed, or a kid is checked in", () => {
+  assert.equal(
+    kidContinueDisabled({ previewLoading: true, previewReady: false, checkedInCount: 0 }),
+    true,
+  );
+  assert.equal(
+    kidContinueDisabled({ previewLoading: false, previewReady: false, checkedInCount: 0 }),
+    true,
+  );
+  assert.equal(
+    kidContinueDisabled({ previewLoading: false, previewReady: true, checkedInCount: 1 }),
+    true,
+  );
+  assert.equal(
+    kidContinueDisabled({ previewLoading: false, previewReady: true, checkedInCount: 0 }),
+    false,
+  );
+});
+
+test("parseDeleteChildIds bounds size and does not echo invalid input", () => {
+  assert.deepEqual(parseDeleteChildIds([`  ${SAMPLE_UUID}  `, SAMPLE_UUID]), {
+    ok: true,
+    ids: [SAMPLE_UUID],
+  });
+
+  const leaked = parseDeleteChildIds(["Maria Santos"]);
+  assert.equal(leaked.ok, false);
+  if (!leaked.ok) assert.equal(leaked.error.includes("Santos"), false);
+
+  assert.equal(parseDeleteChildIds([123]).ok, false);
+  assert.equal(parseDeleteChildIds([]).ok, false);
+  assert.equal(parseDeleteChildIds("nope").ok, false);
+
+  const tooMany = Array.from({ length: DELETE_PREVIEW_MAX_IDS + 1 }, () => SAMPLE_UUID);
+  const capped = parseDeleteChildIds(tooMany);
+  assert.equal(capped.ok, false);
+  if (!capped.ok) assert.match(capped.error, /fewer children/);
+
+  const mixed = parseDeleteChildIds([SAMPLE_UUID, OTHER_UUID, "not-a-uuid"]);
+  assert.equal(mixed.ok, false);
+});
+
+test("preview chunks stay well under one query per child", () => {
+  const ids = Array.from({ length: 250 }, (_, i) => `id-${i}`);
+  const chunks = chunkIds(ids, DELETE_PREVIEW_ID_CHUNK);
+  assert.equal(chunks.length, 4);
+  assert.ok(chunks.every((chunk) => chunk.length <= DELETE_PREVIEW_ID_CHUNK));
+  assert.equal(chunks.flat().length, 250);
+});
+
+test("addPreviewAttendance counts visits and open check-ins", () => {
+  const visitCounts: Record<string, number> = { a: 0, b: 0 };
+  const checkedIn = new Set<string>();
+  addPreviewAttendance(visitCounts, checkedIn, [
+    { childId: "a", timeOut: "2026-01-01T00:00:00Z" },
+    { childId: "a", timeOut: null },
+    { childId: "b", timeOut: "2026-01-02T00:00:00Z" },
+  ]);
+  assert.equal(visitCounts.a, 2);
+  assert.equal(visitCounts.b, 1);
+  assert.deepEqual([...checkedIn], ["a"]);
+});
+
+test("collectPreviewPages reads past the first page and refuses a truncated scan", async () => {
+  const byFrom = new Map<number, { childId: string; timeOut: string | null }[]>([
+    [
+      0,
+      [
+        { childId: "a", timeOut: null },
+        { childId: "a", timeOut: "2026-01-01T00:00:00Z" },
+      ],
+    ],
+    [2, [{ childId: "b", timeOut: "2026-01-02T00:00:00Z" }]],
+  ]);
+  const seen: number[] = [];
+  const rows = await collectPreviewPages(
+    async (from) => {
+      seen.push(from);
+      return byFrom.get(from) ?? [];
+    },
+    2,
+    5,
+  );
+  assert.deepEqual(seen, [0, 2]);
+  assert.equal(rows.length, 3);
+
+  await assert.rejects(
+    () =>
+      collectPreviewPages(
+        async () => [
+          { childId: "a", timeOut: null },
+          { childId: "a", timeOut: "2026-01-01T00:00:00Z" },
+        ],
+        2,
+        2,
+      ),
+    /Could not load visit history/,
+  );
 });
 
 test("runDeleteAtStep only fires on step 2 and once per double-click", async () => {

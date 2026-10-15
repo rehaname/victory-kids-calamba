@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,7 @@ type Props = {
   finalTitle: string;
   finalDescription: string;
   continueDisabled?: boolean;
+  errorTitle?: string;
   onOpenChange: (open: boolean) => void;
   onContinue: () => void;
   onBack: () => void;
@@ -39,20 +40,36 @@ export function TwoStepConfirmDialog({
   finalTitle,
   finalDescription,
   continueDisabled = false,
+  errorTitle = "Could not delete",
   onOpenChange,
   onContinue,
   onBack,
   onConfirmDelete,
 }: Props) {
+  const finalTitleRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (!open || step !== 2) return;
+    // Step 2 replaces Continue. Leave focus on the title so a held Enter
+    // does not activate Delete.
+    finalTitleRef.current?.focus();
+  }, [open, step]);
+
   function handleOpenChange(next: boolean) {
     if (deleting) return;
     onOpenChange(next);
   }
 
+  function blockRepeatKey(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.repeat && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="flex max-h-[min(90vh,40rem)] flex-col gap-4 sm:max-w-md"
+        className="flex max-h-[min(90vh,40rem)] flex-col gap-4 overflow-hidden sm:max-w-md"
         showCloseButton={!deleting}
         onEscapeKeyDown={(event) => {
           if (deleting) event.preventDefault();
@@ -60,29 +77,36 @@ export function TwoStepConfirmDialog({
         onPointerDownOutside={(event) => {
           if (deleting) event.preventDefault();
         }}
+        onInteractOutside={(event) => {
+          if (deleting) event.preventDefault();
+        }}
+        onFocusOutside={(event) => {
+          if (deleting) event.preventDefault();
+        }}
       >
         {step === 1 ? (
           <>
-            <DialogHeader>
+            <DialogHeader className="pr-8">
               <DialogTitle>{summaryTitle}</DialogTitle>
               <DialogDescription className="sr-only">
                 Review what will be removed before continuing.
               </DialogDescription>
             </DialogHeader>
-            <div className="min-h-0 flex-1 overflow-y-auto">{summaryBody}</div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{summaryBody}</div>
             {error ? (
               <Alert variant="destructive">
-                <AlertTitle>Could not delete</AlertTitle>
+                <AlertTitle>{errorTitle}</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
-            <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <DialogFooter className="shrink-0 flex-col gap-2 sm:flex-col">
               <Button
                 type="button"
                 size="xl"
                 className="w-full"
                 disabled={deleting || continueDisabled}
                 onClick={onContinue}
+                onKeyDown={blockRepeatKey}
               >
                 Continue
               </Button>
@@ -100,23 +124,26 @@ export function TwoStepConfirmDialog({
           </>
         ) : (
           <>
-            <DialogHeader>
-              <DialogTitle>{finalTitle}</DialogTitle>
+            <DialogHeader className="pr-8">
+              <DialogTitle ref={finalTitleRef} tabIndex={-1} className="outline-none">
+                {finalTitle}
+              </DialogTitle>
               <DialogDescription>{finalDescription}</DialogDescription>
             </DialogHeader>
             {error ? (
               <Alert variant="destructive">
-                <AlertTitle>Could not delete</AlertTitle>
+                <AlertTitle>{errorTitle}</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
-            <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <DialogFooter className="shrink-0 flex-col gap-2 sm:flex-col">
               <Button
                 type="button"
                 size="xl"
                 className="w-full bg-red-700 text-white hover:bg-red-800"
                 disabled={deleting}
                 onClick={onConfirmDelete}
+                onKeyDown={blockRepeatKey}
               >
                 {deleting ? "Deleting…" : "Delete"}
               </Button>

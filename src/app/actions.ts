@@ -9,6 +9,7 @@ import { formatDuplicateBlockMessage } from "@/lib/child-duplicates";
 import { errorMessage, logServerError } from "@/lib/errors";
 import { kioskDuplicateResult } from "@/lib/kiosk-public";
 import { toKioskChildHit } from "@/lib/kiosk-search";
+import { parseDeleteChildIds } from "@/lib/staff-delete-confirm";
 import { localDemoPin } from "@/lib/staff-pin-local";
 import { grantStaffSession, requireStaff, StaffAuthError } from "@/lib/staff-session";
 import {
@@ -332,20 +333,9 @@ export async function getChildrenDeletePreviewAction(
   try {
     await requireStaff();
     resolveDataSource();
-    if (!Array.isArray(childIds)) {
-      return { ok: false, error: "Select at least one child." };
-    }
-    const ids = [...new Set(childIds.map((id) => id.trim()).filter(Boolean))];
-    if (ids.length === 0) {
-      return { ok: false, error: "Select at least one child." };
-    }
-    if (ids.length > 1000) {
-      return { ok: false, error: "Select fewer children and try again." };
-    }
-    if (!ids.every(isRosterChildUuid)) {
-      return { ok: false, error: "Select at least one child." };
-    }
-    const preview = await getRepository().getChildrenDeletePreview(ids);
+    const parsed = parseDeleteChildIds(childIds);
+    if (!parsed.ok) return parsed;
+    const preview = await getRepository().getChildrenDeletePreview(parsed.ids);
     return { ok: true, ...preview };
   } catch (err) {
     logServerError("getChildrenDeletePreviewAction failed", err);
