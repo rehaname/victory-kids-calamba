@@ -27,40 +27,51 @@ type Props = {
 };
 
 export function SessionKidsDialog({ open, onOpenChange, session }: Props) {
-  /** null means the roster has not come back yet. */
-  const [rows, setRows] = useState<AttendanceWithChild[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  /** Bumped by Refresh to re-run the fetch effect. */
+  /** Bumped by Refresh and each time the dialog opens, so a previous error cannot stick. */
   const [reloadToken, setReloadToken] = useState(0);
+  const [wasOpen, setWasOpen] = useState(false);
+  const [roster, setRoster] = useState<{
+    key: string;
+    rows: AttendanceWithChild[];
+    error: string | null;
+  } | null>(null);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setReloadToken((token) => token + 1);
+  }
   const [printingId, setPrintingId] = useState<string | null>(null);
   /** Held only while the print dialog needs an element to capture. */
   const [pendingSlip, setPendingSlip] = useState<Receipt | null>(null);
   const { paperWidth } = usePrinterSettings();
 
   const sessionId = session?.id ?? null;
-  const loading = rows === null;
+  const requestKey = open && sessionId ? `${sessionId}:${reloadToken}` : "";
+  const activeRoster = roster?.key === requestKey ? roster : null;
+  const rows = activeRoster?.rows ?? null;
+  const loadError = activeRoster?.error ?? null;
+  const loading = Boolean(requestKey) && !activeRoster;
 
   useEffect(() => {
-    if (!open || !sessionId) return;
+    if (!requestKey || !sessionId) return;
     let cancelled = false;
-    setLoadError(null);
     getSessionRosterAction(sessionId).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
-        setLoadError(result.error);
-        setRows([]);
+        setRoster({ key: requestKey, rows: [], error: result.error });
         return;
       }
-      setRows(result.rows);
+      setRoster({ key: requestKey, rows: result.rows, error: null });
+    }).catch((err: unknown) => {
+      if (cancelled) return;
+      const message = err instanceof Error ? err.message : "Could not load who is checked in.";
+      setRoster({ key: requestKey, rows: [], error: message });
     });
     return () => {
       cancelled = true;
     };
-  }, [open, sessionId, reloadToken]);
+  }, [requestKey, sessionId]);
 
   function reload() {
-    setRows(null);
-    setLoadError(null);
     setReloadToken((token) => token + 1);
   }
 

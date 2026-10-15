@@ -64,6 +64,7 @@ type SessionRow = {
   location: string | null;
   service_time: string | null;
   session_date: string | null;
+  deleted_at?: string | null;
 };
 
 type AttendanceRow = {
@@ -115,6 +116,7 @@ function mapSession(row: SessionRow): Session {
     location: row.location?.trim() || "",
     serviceTime: normalizeServiceTime(row.service_time),
     sessionDate: row.session_date || manilaDate(new Date(row.started_at)),
+    deletedAt: row.deleted_at ?? null,
   };
 }
 
@@ -183,6 +185,7 @@ export const supabaseRepository: KidsRepository = {
       .from("sessions")
       .select("*")
       .eq("status", "open")
+      .is("deleted_at", null)
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -196,6 +199,7 @@ export const supabaseRepository: KidsRepository = {
       .from("sessions")
       .select("*")
       .eq("status", "open")
+      .is("deleted_at", null)
       .order("started_at", { ascending: false });
     if (error) throwDb(error, "Could not load open sessions");
     return ((data ?? []) as SessionRow[]).map(mapSession);
@@ -207,6 +211,7 @@ export const supabaseRepository: KidsRepository = {
       .from("sessions")
       .select("*")
       .eq("id", sessionId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throwDb(error, "Could not load session");
     return data ? mapSession(data as SessionRow) : null;
@@ -217,6 +222,7 @@ export const supabaseRepository: KidsRepository = {
     const { data, error } = await supabase
       .from("sessions")
       .select("*")
+      .is("deleted_at", null)
       .order("started_at", { ascending: false });
     if (error) throwDb(error, "Could not load sessions");
     return ((data ?? []) as SessionRow[]).map(mapSession);
@@ -251,6 +257,7 @@ export const supabaseRepository: KidsRepository = {
       .update({ status: "closed", ended_at: new Date().toISOString() })
       .eq("id", sessionId)
       .eq("status", "open")
+      .is("deleted_at", null)
       .select("*")
       .single();
     if (error) throwDb(error, "Could not close session");
@@ -306,6 +313,24 @@ export const supabaseRepository: KidsRepository = {
       .eq("id", childId)
       .is("deleted_at", null);
     if (updateError) throwDb(updateError, "Could not remove child from roster");
+  },
+
+  async softDeleteChildren(childIds) {
+    // One transaction: lock every child, refuse if any are missing, already
+    // removed, or checked in, then stamp deleted_at. See 08_sessions_deleted_at.sql.
+    const { error } = await db().rpc("soft_delete_children", {
+      child_ids: childIds,
+    });
+    if (error) throwDb(error, "Could not remove children from roster");
+  },
+
+  async softDeleteSession(sessionId) {
+    // Locks the session, blocks while time_out is null, and closes an open
+    // session in the same update. See 08_sessions_deleted_at.sql.
+    const { error } = await db().rpc("soft_delete_session", {
+      p_session_id: sessionId,
+    });
+    if (error) throwDb(error, "Could not remove session");
   },
 
   async findLikelyDuplicates(children: ChildIdentity[]) {

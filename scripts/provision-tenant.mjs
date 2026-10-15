@@ -44,6 +44,7 @@ const kidsSqlFiles = [
   "04_sessions_service_metadata.sql",
   "05_sessions_location.sql",
   "06_children_deleted_at.sql",
+  "08_sessions_deleted_at.sql",
 ];
 
 async function api(method, path, body) {

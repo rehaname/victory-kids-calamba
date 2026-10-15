@@ -30,6 +30,16 @@ export interface KidsRepository {
    * (any attendance with time_out null). Does not delete attendance or parents.
    */
   softDeleteChild(childId: string): Promise<void>;
+  /**
+   * All-or-nothing soft-delete. If any id is missing, already removed, or
+   * checked in, none of the ids are removed.
+   */
+  softDeleteChildren(childIds: string[]): Promise<void>;
+  /**
+   * Hide a session from History and open lists. Refuses while any attendance
+   * row has time_out null. An open session is closed in the same update.
+   */
+  softDeleteSession(sessionId: string): Promise<void>;
 
   /**
    * Find active (non-deleted) children that look like duplicates of the

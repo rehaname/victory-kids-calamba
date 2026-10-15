@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { deleteChildAction } from "@/app/actions";
+import { deleteChildAction, deleteChildrenAction } from "@/app/actions";
 import {
   downloadCsv,
   ROSTER_HEADERS,
@@ -25,6 +25,45 @@ type Props = {
   loadFailed?: boolean;
 };
 
+function rosterSort(a: ChildWithParent, b: ChildWithParent) {
+  return `${a.lastName}${a.firstName}`.localeCompare(`${b.lastName}${b.firstName}`);
+}
+
+function buildBulkDeleteConfirm(
+  selectedIds: Set<string>,
+  rows: ChildWithParent[],
+  rosterById: Map<string, ChildWithParent>,
+): string {
+  const n = selectedIds.size;
+  const rowIdSet = new Set(rows.map((c) => c.id));
+  const hiddenCount = [...selectedIds].filter((id) => !rowIdSet.has(id)).length;
+
+  const selectedChildren = [...selectedIds]
+    .map((id) => rosterById.get(id))
+    .filter((c): c is ChildWithParent => Boolean(c))
+    .sort(rosterSort);
+
+  const lines: string[] = [];
+
+  if (n === 1 && selectedChildren[0]) {
+    const child = selectedChildren[0];
+    lines.push(`Remove ${child.firstName} ${child.lastName} from the roster?`);
+  } else if (n >= 2 && n <= 8) {
+    lines.push(`Remove ${n} children from the roster?`);
+    for (const child of selectedChildren) {
+      lines.push(`• ${child.firstName} ${child.lastName}`);
+    }
+  } else {
+    lines.push(`Remove ${n} children from the roster?`);
+  }
+
+  if (hiddenCount > 0) {
+    lines.push(`Includes ${hiddenCount} not shown in the current search.`);
+  }
+  lines.push("Past check-ins stay in history.");
+  return lines.join("\n");
+}
+
 export function ChildrenRoster({
   roster,
   configError = null,
@@ -34,13 +73,22 @@ export function ChildrenRoster({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const deleteLock = useRef(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
 
   const visibleRoster = useMemo(
     () => roster.filter((child) => !removedIds.has(child.id)),
     [roster, removedIds],
   );
+
+  const rosterById = useMemo(() => {
+    const map = new Map<string, ChildWithParent>();
+    for (const child of visibleRoster) map.set(child.id, child);
+    return map;
+  }, [visibleRoster]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -61,12 +109,95 @@ export function ChildrenRoster({
     });
   }, [visibleRoster, query]);
 
+  const shownIds = useMemo(() => rows.map((c) => c.id), [rows]);
+  const allShownSelected =
+    shownIds.length > 0 && shownIds.every((id) => selectedIds.has(id));
+  const someShownSelected =
+    shownIds.some((id) => selectedIds.has(id)) && !allShownSelected;
+
+  useEffect(() => {
+    const el = selectAllRef.current;
+    if (el) el.indeterminate = someShownSelected;
+  }, [someShownSelected]);
+
+  const controlsDisabled = bulkDeleting || Boolean(deletingId);
+
   function exportRoster() {
     downloadCsv(
       `registered-children-${new Date().toISOString().slice(0, 10)}.csv`,
       ROSTER_HEADERS,
       rows.map(rosterCells),
     );
+  }
+
+  function toggleRow(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllShown() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allShownSelected) {
+        for (const id of shownIds) next.delete(id);
+      } else {
+        for (const id of shownIds) next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkDelete() {
+    if (deleteLock.current || selectedIds.size === 0) return;
+    deleteLock.current = true;
+
+    const confirmed = window.confirm(
+      buildBulkDeleteConfirm(selectedIds, rows, rosterById),
+    );
+    if (!confirmed) {
+      deleteLock.current = false;
+      return;
+    }
+
+    setBulkDeleting(true);
+    const ids = [...selectedIds];
+    try {
+      const result = await deleteChildrenAction(ids);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setRemovedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.add(id);
+        return next;
+      });
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
+      if (ids.length === 1) {
+        const child = rosterById.get(ids[0]!);
+        toast.success(
+          child
+            ? `${child.firstName} ${child.lastName} removed from roster`
+            : "1 removed from roster",
+        );
+      } else {
+        toast.success(`${ids.length} removed from roster`);
+      }
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove children.");
+    } finally {
+      deleteLock.current = false;
+      setBulkDeleting(false);
+    }
   }
 
   async function handleDelete(child: ChildWithParent) {
@@ -89,6 +220,11 @@ export function ChildrenRoster({
         return;
       }
       setRemovedIds((prev) => new Set(prev).add(child.id));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(child.id);
+        return next;
+      });
       toast.success(`${child.firstName} ${child.lastName} removed from roster`);
       router.refresh();
     } catch (err) {
@@ -98,6 +234,8 @@ export function ChildrenRoster({
       setDeletingId(null);
     }
   }
+
+  const selectedCount = selectedIds.size;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#e8f0ff_0%,_#ffffff_45%,_#f4f6f8_100%)] text-black">
@@ -117,8 +255,21 @@ export function ChildrenRoster({
           </Button>
           <Button
             size="xl"
+            variant="outline"
+            disabled={selectedCount === 0 || controlsDisabled}
+            className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+            onClick={() => void handleBulkDelete()}
+          >
+            {bulkDeleting
+              ? "Deleting…"
+              : selectedCount > 0
+                ? `Delete selected (${selectedCount})`
+                : "Delete selected"}
+          </Button>
+          <Button
+            size="xl"
             className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
-            disabled={rows.length === 0}
+            disabled={rows.length === 0 || controlsDisabled}
             onClick={exportRoster}
           >
             Extract CSV
@@ -137,6 +288,7 @@ export function ChildrenRoster({
             className="h-14 text-base"
             placeholder="Name, nickname, parent, address, or contact…"
             value={query}
+            disabled={controlsDisabled}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
@@ -145,6 +297,17 @@ export function ChildrenRoster({
           <table className="w-full min-w-[66rem] text-left text-sm">
             <thead className="bg-[#2e7d32] text-white">
               <tr>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="size-5"
+                    aria-label="Select all shown children"
+                    checked={allShownSelected}
+                    disabled={controlsDisabled || rows.length === 0}
+                    onChange={toggleSelectAllShown}
+                  />
+                </th>
                 {ROSTER_HEADERS.map((header) => (
                   <th key={header} className="whitespace-nowrap px-3 py-3 font-medium">
                     {header}
@@ -157,7 +320,7 @@ export function ChildrenRoster({
               {rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={ROSTER_HEADERS.length + 1}
+                    colSpan={ROSTER_HEADERS.length + 2}
                     className="px-4 py-10 text-center text-black/45"
                   >
                     {loadFailed
@@ -172,6 +335,16 @@ export function ChildrenRoster({
                   const busy = deletingId === child.id;
                   return (
                     <tr key={child.id} className="border-t border-black/5">
+                      <td className="px-3 py-2.5">
+                        <input
+                          type="checkbox"
+                          className="size-5"
+                          aria-label={`Select ${child.firstName} ${child.lastName}`}
+                          checked={selectedIds.has(child.id)}
+                          disabled={controlsDisabled}
+                          onChange={(e) => toggleRow(child.id, e.target.checked)}
+                        />
+                      </td>
                       <td className="px-3 py-2.5 font-medium">{child.lastName}</td>
                       <td className="px-3 py-2.5">{child.firstName}</td>
                       <td className="px-3 py-2.5">{child.nickname || "—"}</td>
@@ -192,7 +365,7 @@ export function ChildrenRoster({
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={Boolean(deletingId)}
+                          disabled={controlsDisabled}
                           className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                           onClick={() => void handleDelete(child)}
                         >

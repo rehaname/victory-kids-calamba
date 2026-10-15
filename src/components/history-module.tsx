@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { getSessionHistoryAction } from "@/app/actions";
+import { deleteSessionAction, getSessionHistoryAction } from "@/app/actions";
 import {
   formatBirthdayMdY,
   formatTime,
@@ -28,13 +29,45 @@ type Props = {
   dataSource?: "supabase" | "memory" | "error";
 };
 
+function buildSessionDeleteConfirm(
+  session: Session,
+  historyRows: AttendanceWithChild[],
+): string {
+  const lines: string[] = [`Delete ${sessionDisplayName(session)}?`];
+  const n = historyRows.length;
+  if (n === 0) {
+    lines.push("This session has no check-ins.");
+  } else {
+    lines.push(
+      `${n} check-in(s) will be hidden from History. Kids stay on the roster.`,
+    );
+    if (n <= 8) {
+      for (const row of historyRows) {
+        lines.push(`• ${row.child.firstName} ${row.child.lastName}`);
+      }
+    }
+    if (historyRows.some((row) => row.timeOut === null)) {
+      lines.push("Kids still checked in must be checked out first.");
+    }
+  }
+  return lines.join("\n");
+}
+
 export function HistoryModule({
   sessions,
   configError = null,
   missingEnv = [],
   dataSource = "supabase",
 }: Props) {
+  const router = useRouter();
   const [historySessionId, setHistorySessionId] = useState(sessions[0]?.id ?? "");
+  const [removedSessionIds, setRemovedSessionIds] = useState<Set<string>>(() => new Set());
+  const [deletingSession, setDeletingSession] = useState(false);
+  const deleteLock = useRef(false);
+  const visibleSessions = useMemo(
+    () => sessions.filter((session) => !removedSessionIds.has(session.id)),
+    [sessions, removedSessionIds],
+  );
   /** Tagged with the session it belongs to, so a switch never shows stale rows. */
   const [loaded, setLoaded] = useState<{
     sessionId: string;
@@ -42,45 +75,89 @@ export function HistoryModule({
   } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const historyRows = loaded?.sessionId === historySessionId ? loaded.rows : [];
-  const pending = Boolean(historySessionId) && loaded?.sessionId !== historySessionId;
+  const activeSessionId =
+    historySessionId && visibleSessions.some((s) => s.id === historySessionId)
+      ? historySessionId
+      : (visibleSessions[0]?.id ?? "");
+
+  const historyRows = loaded?.sessionId === activeSessionId ? loaded.rows : [];
+  const pending = Boolean(activeSessionId) && loaded?.sessionId !== activeSessionId;
+  const historyReady =
+    Boolean(activeSessionId) && loaded?.sessionId === activeSessionId && !loadError;
+  const selectedSession = visibleSessions.find((s) => s.id === activeSessionId) ?? null;
+  const controlsDisabled = deletingSession || pending;
 
   useEffect(() => {
-    if (!historySessionId) return;
+    if (!activeSessionId) return;
     let cancelled = false;
-    getSessionHistoryAction(historySessionId)
+    getSessionHistoryAction(activeSessionId)
       .then((result) => {
         if (cancelled) return;
         if (!result.ok) {
           setLoadError(result.error);
-          setLoaded({ sessionId: historySessionId, rows: [] });
+          setLoaded({ sessionId: activeSessionId, rows: [] });
           return;
         }
         setLoadError(null);
-        setLoaded({ sessionId: historySessionId, rows: result.rows });
+        setLoaded({ sessionId: activeSessionId, rows: result.rows });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Could not load history";
         setLoadError(message);
-        setLoaded({ sessionId: historySessionId, rows: [] });
+        setLoaded({ sessionId: activeSessionId, rows: [] });
         toast.error(message);
       });
     return () => {
       cancelled = true;
     };
-  }, [historySessionId]);
+  }, [activeSessionId]);
 
   function exportSession() {
-    const selected = sessions.find((s) => s.id === historySessionId);
+    const selected = visibleSessions.find((s) => s.id === activeSessionId);
     const stamp = selected
       ? sessionDisplayName(selected).replace(/[^a-zA-Z0-9]+/g, "-")
-      : historySessionId;
+      : activeSessionId;
     downloadCsv(
       `kids-church-session-${stamp}.csv`,
       SESSION_EXPORT_HEADERS,
       historyRows.map(sessionExportCells),
     );
+  }
+
+  async function handleDeleteSession() {
+    if (deleteLock.current || !historyReady || !selectedSession) return;
+    deleteLock.current = true;
+
+    const confirmed = window.confirm(
+      buildSessionDeleteConfirm(selectedSession, historyRows),
+    );
+    if (!confirmed) {
+      deleteLock.current = false;
+      return;
+    }
+
+    setDeletingSession(true);
+    const removedId = activeSessionId;
+    try {
+      const result = await deleteSessionAction(removedId);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const remaining = visibleSessions.filter((s) => s.id !== removedId);
+      setRemovedSessionIds((prev) => new Set(prev).add(removedId));
+      setHistorySessionId(remaining[0]?.id ?? "");
+      setLoaded(null);
+      setLoadError(null);
+      toast.success("Session removed from History");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove session.");
+    } finally {
+      deleteLock.current = false;
+      setDeletingSession(false);
+    }
   }
 
   return (
@@ -107,6 +184,7 @@ export function HistoryModule({
             <Button
               size="xl"
               className="bg-[#003B8E] text-white hover:bg-[#002c6b]"
+              disabled={controlsDisabled}
               onClick={exportSession}
             >
               Extract session CSV
@@ -116,23 +194,35 @@ export function HistoryModule({
 
         <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
           <Label className="mb-2 block">Session</Label>
-          <select
-            className="h-14 w-full rounded-md border border-black/15 bg-white px-3 text-base"
-            value={historySessionId}
-            disabled={pending}
-            onChange={(e) => setHistorySessionId(e.target.value)}
-          >
-            {sessions.length === 0 && (
-              <option value="">
-                {dataSource === "error" ? "Could not load sessions" : "No sessions yet"}
-              </option>
-            )}
-            {sessions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {sessionDisplayName(s)} · {s.status}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <select
+              className="h-14 w-full flex-1 rounded-md border border-black/15 bg-white px-3 text-base"
+              value={activeSessionId}
+              disabled={controlsDisabled}
+              onChange={(e) => setHistorySessionId(e.target.value)}
+            >
+              {visibleSessions.length === 0 && (
+                <option value="">
+                  {dataSource === "error" ? "Could not load sessions" : "No sessions yet"}
+                </option>
+              )}
+              {visibleSessions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {sessionDisplayName(s)} · {s.status}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              size="xl"
+              disabled={!historyReady || controlsDisabled}
+              className="shrink-0 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+              onClick={() => void handleDeleteSession()}
+            >
+              {deletingSession ? "Deleting…" : "Delete session"}
+            </Button>
+          </div>
         </div>
 
         <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-black/5">

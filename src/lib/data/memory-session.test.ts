@@ -153,3 +153,196 @@ test("memory findLikelyDuplicates matches same name and birthday", async () => {
   assert.equal(hits.length, 1);
   assert.equal(hits[0]?.parentName, "Maria Reyes");
 });
+
+async function registerTwoChildren() {
+  return memoryRepository.registerFamily({
+    parent: {
+      fullName: "Parent One",
+      address: "",
+      contactNumber: "0917",
+    },
+    children: [
+      {
+        firstName: "Ana",
+        lastName: "Reyes",
+        birthday: "2018-06-15",
+        homeService: "9am",
+      },
+      {
+        firstName: "Ben",
+        lastName: "Reyes",
+        birthday: "2017-03-10",
+        homeService: "9am",
+      },
+    ],
+  });
+}
+
+test("memory softDeleteChildren removes all ids and keeps history", async () => {
+  resetStore();
+  const { children } = await registerTwoChildren();
+  const session = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+  await memoryRepository.checkIn(session.id, children[0]!.id);
+  await memoryRepository.checkOut(
+    (await memoryRepository.listActiveAttendance(session.id))[0]!.id,
+    "Parent One",
+  );
+
+  await memoryRepository.softDeleteChildren(children.map((c) => c.id));
+
+  assert.equal((await memoryRepository.listChildren()).length, 0);
+  const history = await memoryRepository.listAttendanceForSession(session.id);
+  assert.equal(history.length, 1);
+  assert.ok(history[0]?.child.deletedAt);
+});
+
+test("memory softDeleteChildren is all-or-nothing when one is checked in", async () => {
+  resetStore();
+  const { children } = await registerTwoChildren();
+  const session = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+  await memoryRepository.checkIn(session.id, children[0]!.id);
+
+  await assert.rejects(
+    () => memoryRepository.softDeleteChildren(children.map((c) => c.id)),
+    /Nothing was removed/,
+  );
+
+  assert.equal((await memoryRepository.listChildren()).length, 2);
+  assert.equal(
+    (await memoryRepository.listActiveAttendance(session.id)).length,
+    1,
+  );
+});
+
+test("memory softDeleteChildren rejects unknown or deleted ids without partial delete", async () => {
+  resetStore();
+  const { children } = await registerTwoChildren();
+  const goodId = children[0]!.id;
+  const badId = "00000000-0000-4000-8000-000000000001";
+
+  await assert.rejects(
+    () => memoryRepository.softDeleteChildren([goodId, badId]),
+    /Nothing was removed/,
+  );
+  assert.equal((await memoryRepository.listChildren()).length, 2);
+
+  await memoryRepository.softDeleteChild(goodId);
+  await assert.rejects(
+    () => memoryRepository.softDeleteChildren([goodId, children[1]!.id]),
+    /Nothing was removed/,
+  );
+  assert.equal((await memoryRepository.listChildren()).length, 1);
+});
+
+test("memory softDeleteSession hides closed session but keeps attendance", async () => {
+  resetStore();
+  const { children } = await registerTwoChildren();
+  const session = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+  await memoryRepository.checkIn(session.id, children[0]!.id);
+  await memoryRepository.checkOut(
+    (await memoryRepository.listActiveAttendance(session.id))[0]!.id,
+    "Parent One",
+  );
+  await memoryRepository.closeSession(session.id);
+
+  await memoryRepository.softDeleteSession(session.id);
+
+  assert.equal((await memoryRepository.listSessions()).length, 0);
+  assert.equal((await memoryRepository.listOpenSessions()).length, 0);
+  assert.equal(await memoryRepository.getSession(session.id), null);
+  assert.equal(
+    (await memoryRepository.listAttendanceForSession(session.id)).length,
+    1,
+  );
+});
+
+test("memory softDeleteSession blocks open session with checked-in kids", async () => {
+  resetStore();
+  const { children } = await registerTwoChildren();
+  const session = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+  await memoryRepository.checkIn(session.id, children[0]!.id);
+
+  await assert.rejects(
+    () => memoryRepository.softDeleteSession(session.id),
+    /still checked in/,
+  );
+
+  const stored = g.__victoryKidsStore!.sessions.find((s) => (s as { id: string }).id === session.id) as {
+    status: string;
+    deletedAt: string | null;
+  };
+  assert.equal(stored.status, "open");
+  assert.equal(stored.deletedAt, null);
+});
+
+test("memory softDeleteSession closes empty open session", async () => {
+  resetStore();
+  const session = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+
+  await memoryRepository.softDeleteSession(session.id);
+
+  assert.equal((await memoryRepository.listOpenSessions()).length, 0);
+  const stored = g.__victoryKidsStore!.sessions.find((s) => (s as { id: string }).id === session.id) as {
+    status: string;
+    deletedAt: string | null;
+    endedAt: string | null;
+  };
+  assert.ok(stored.deletedAt);
+  assert.equal(stored.status, "closed");
+  assert.ok(stored.endedAt);
+});
+
+test("memory softDeleteSession rejects already removed session", async () => {
+  resetStore();
+  const session = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+  await memoryRepository.softDeleteSession(session.id);
+
+  await assert.rejects(
+    () => memoryRepository.softDeleteSession(session.id),
+    /already removed/,
+  );
+});
+
+test("memory checkIn rejects a removed session or a removed child", async () => {
+  resetStore();
+  const { children } = await registerTwoChildren();
+  const removed = await memoryRepository.startSession({
+    serviceTime: "9am",
+    location: "Halang",
+  });
+  await memoryRepository.softDeleteSession(removed.id);
+  await assert.rejects(
+    () => memoryRepository.checkIn(removed.id, children[0]!.id),
+    /No open session/,
+  );
+
+  const open = await memoryRepository.startSession({
+    serviceTime: "11am",
+    location: "Halang",
+  });
+  await memoryRepository.softDeleteChild(children[0]!.id);
+  await assert.rejects(
+    () => memoryRepository.checkIn(open.id, children[0]!.id),
+    /removed from the roster/,
+  );
+  await memoryRepository.checkIn(open.id, children[1]!.id);
+  assert.equal((await memoryRepository.listActiveAttendance(open.id)).length, 1);
+});

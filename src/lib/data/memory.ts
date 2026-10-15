@@ -83,18 +83,20 @@ export const memoryRepository: KidsRepository = {
 
   async listOpenSessions() {
     return store()
-      .sessions.filter((s) => s.status === "open")
+      .sessions.filter((s) => s.status === "open" && !s.deletedAt)
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   },
 
   async getSession(sessionId) {
-    return store().sessions.find((s) => s.id === sessionId) ?? null;
+    const session = store().sessions.find((s) => s.id === sessionId);
+    if (!session || session.deletedAt) return null;
+    return session;
   },
 
   async listSessions() {
-    return [...store().sessions].sort((a, b) =>
-      b.startedAt.localeCompare(a.startedAt),
-    );
+    return [...store().sessions]
+      .filter((s) => !s.deletedAt)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   },
 
   async startSession(input?: StartSessionInput) {
@@ -116,6 +118,7 @@ export const memoryRepository: KidsRepository = {
       location,
       serviceTime,
       sessionDate,
+      deletedAt: null,
     };
     store().sessions.unshift(session);
     return session;
@@ -123,7 +126,7 @@ export const memoryRepository: KidsRepository = {
 
   async closeSession(sessionId) {
     const session = store().sessions.find((s) => s.id === sessionId);
-    if (!session) throw new Error("Session not found");
+    if (!session || session.deletedAt) throw new Error("Session not found");
     if (session.status !== "open") throw new Error("Session already closed");
     session.status = "closed";
     session.endedAt = now();
@@ -171,6 +174,71 @@ export const memoryRepository: KidsRepository = {
     }
 
     child.deletedAt = now();
+  },
+
+  async softDeleteChildren(childIds) {
+    const children = store().children;
+    const rows = childIds.map((id) => children.find((c) => c.id === id));
+    if (rows.some((c) => !c) || rows.some((c) => c!.deletedAt)) {
+      throw new Error(
+        "Some selected children are no longer on the roster. Nothing was removed.",
+      );
+    }
+
+    const activeChildIds = new Set<string>();
+    for (const childId of childIds) {
+      const active = store().attendance.find(
+        (a) => a.childId === childId && !a.timeOut,
+      );
+      if (active) activeChildIds.add(childId);
+    }
+    if (activeChildIds.size > 0) {
+      const names = [...activeChildIds]
+        .map((id) => children.find((c) => c.id === id)!)
+        .map((c) => `${c.firstName} ${c.lastName}`);
+      const shown = names.slice(0, 8);
+      const rest = names.length - shown.length;
+      const list =
+        rest > 0
+          ? `${shown.join(", ")}, and ${rest} others`
+          : shown.join(", ");
+      throw new Error(
+        `Check out first before removing: ${list}. Nothing was removed.`,
+      );
+    }
+
+    const stamp = now();
+    const targets = childIds.map((childId) => {
+      const child = children.find((c) => c.id === childId);
+      if (!child || child.deletedAt) {
+        throw new Error("Some selected children changed. Refresh and try again.");
+      }
+      return child;
+    });
+    for (const child of targets) child.deletedAt = stamp;
+  },
+
+  async softDeleteSession(sessionId) {
+    const session = store().sessions.find((s) => s.id === sessionId);
+    if (!session) throw new Error("Session not found");
+    if (session.deletedAt) {
+      throw new Error("That session is already removed.");
+    }
+
+    const stillIn = store().attendance.filter(
+      (a) => a.sessionId === sessionId && !a.timeOut,
+    ).length;
+    if (stillIn > 0) {
+      throw new Error(
+        `${stillIn} child(ren) still checked in. Check them out before deleting this session.`,
+      );
+    }
+
+    session.deletedAt = now();
+    if (session.status === "open") {
+      session.status = "closed";
+      session.endedAt = session.deletedAt;
+    }
   },
 
   async findLikelyDuplicates(children: ChildIdentity[]) {
@@ -241,7 +309,7 @@ export const memoryRepository: KidsRepository = {
 
   async checkIn(sessionId, childId) {
     const session = store().sessions.find((s) => s.id === sessionId);
-    if (!session || session.status !== "open") {
+    if (!session || session.deletedAt || session.status !== "open") {
       throw new Error("No open session");
     }
     const child = store().children.find((c) => c.id === childId);

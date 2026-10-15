@@ -52,6 +52,8 @@ export type Session = {
   serviceTime: string;
   /** Manila-local date the session belongs to (YYYY-MM-DD). */
   sessionDate: string;
+  /** Soft-delete timestamp; null means still visible in History and open lists. */
+  deletedAt: string | null;
 };
 
 export type StartSessionInput = {
