@@ -355,4 +355,21 @@ export const memoryRepository: KidsRepository = {
       .filter((row): row is AttendanceWithChild => row !== null)
       .sort((a, b) => a.timeIn.localeCompare(b.timeIn));
   },
+
+  async getChildrenDeletePreview(childIds) {
+    const visitCounts: Record<string, number> = {};
+    for (const id of childIds) visitCounts[id] = 0;
+
+    const checkedIn = new Set<string>();
+    for (const row of store().attendance) {
+      if (!childIds.includes(row.childId)) continue;
+      visitCounts[row.childId] = (visitCounts[row.childId] ?? 0) + 1;
+      if (!row.timeOut) checkedIn.add(row.childId);
+    }
+
+    return {
+      visitCounts,
+      checkedInChildIds: [...checkedIn],
+    };
+  },
 };

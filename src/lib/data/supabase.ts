@@ -516,4 +516,33 @@ export const supabaseRepository: KidsRepository = {
       .map(mapAttendance)
       .filter((row): row is AttendanceWithChild => row !== null);
   },
+
+  async getChildrenDeletePreview(childIds) {
+    const visitCounts: Record<string, number> = {};
+    for (const id of childIds) visitCounts[id] = 0;
+    if (childIds.length === 0) {
+      return { visitCounts, checkedInChildIds: [] };
+    }
+
+    const supabase = db();
+    const { data, error } = await supabase
+      .from("attendance")
+      .select("child_id, time_out")
+      .in("child_id", childIds);
+    if (error) throwDb(error, "Could not load visit history");
+
+    const checkedIn = new Set<string>();
+    for (const row of data ?? []) {
+      const childId = (row as { child_id: string; time_out: string | null }).child_id;
+      visitCounts[childId] = (visitCounts[childId] ?? 0) + 1;
+      if ((row as { time_out: string | null }).time_out === null) {
+        checkedIn.add(childId);
+      }
+    }
+
+    return {
+      visitCounts,
+      checkedInChildIds: [...checkedIn],
+    };
+  },
 };

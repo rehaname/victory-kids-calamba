@@ -56,4 +56,10 @@ export interface KidsRepository {
   ): Promise<Attendance>;
 
   listAttendanceForSession(sessionId: string): Promise<AttendanceWithChild[]>;
+
+  /** Past attendance rows per child and who is currently checked in (time_out null). */
+  getChildrenDeletePreview(childIds: string[]): Promise<{
+    visitCounts: Record<string, number>;
+    checkedInChildIds: string[];
+  }>;
 }

@@ -318,6 +318,44 @@ export async function deleteChildAction(childId: string) {
   }
 }
 
+export type ChildrenDeletePreviewResult =
+  | {
+      ok: true;
+      visitCounts: Record<string, number>;
+      checkedInChildIds: string[];
+    }
+  | { ok: false; error: string };
+
+export async function getChildrenDeletePreviewAction(
+  childIds: string[],
+): Promise<ChildrenDeletePreviewResult> {
+  try {
+    await requireStaff();
+    resolveDataSource();
+    if (!Array.isArray(childIds)) {
+      return { ok: false, error: "Select at least one child." };
+    }
+    const ids = [...new Set(childIds.map((id) => id.trim()).filter(Boolean))];
+    if (ids.length === 0) {
+      return { ok: false, error: "Select at least one child." };
+    }
+    if (ids.length > 1000) {
+      return { ok: false, error: "Select fewer children and try again." };
+    }
+    if (!ids.every(isRosterChildUuid)) {
+      return { ok: false, error: "Select at least one child." };
+    }
+    const preview = await getRepository().getChildrenDeletePreview(ids);
+    return { ok: true, ...preview };
+  } catch (err) {
+    logServerError("getChildrenDeletePreviewAction failed", err);
+    return {
+      ok: false,
+      error: errorMessage(err, "Could not load delete summary."),
+    };
+  }
+}
+
 export async function deleteChildrenAction(childIds: string[]) {
   try {
     await requireStaff();
