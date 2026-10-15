@@ -12,7 +12,8 @@ test("session soft-delete SQL stays in victory_calamba and keeps anon locked out
   assert.match(sql, /create index if not exists sessions_active_started_at_idx/i);
   assert.match(sql, /on victory_calamba\.sessions \(started_at desc\)/i);
   assert.doesNotMatch(sql, /create index if not exists victory_calamba\.sessions_active_started_at_idx/i);
-  assert.match(sql, /function victory_calamba\.soft_delete_session\(session_id uuid\)/);
+  assert.match(sql, /function victory_calamba\.soft_delete_session\(p_session_id uuid\)/);
+  assert.doesNotMatch(sql, /soft_delete_session\(session_id uuid\)/);
   assert.match(sql, /function victory_calamba\.soft_delete_children\(child_ids uuid\[\]\)/);
   assert.match(sql, /for update/i);
   assert.match(sql, /time_out is null/i);

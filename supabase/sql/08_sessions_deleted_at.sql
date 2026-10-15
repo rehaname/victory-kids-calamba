@@ -181,7 +181,9 @@ begin
 end;
 $$;
 
-create or replace function victory_calamba.soft_delete_session(session_id uuid)
+-- p_session_id, not session_id: a parameter with that name is ambiguous
+-- against attendance.session_id inside this function.
+create or replace function victory_calamba.soft_delete_session(p_session_id uuid)
 returns void
 language plpgsql
 set search_path = victory_calamba, pg_temp
@@ -191,13 +193,13 @@ declare
   still_in int;
   stamp timestamptz := now();
 begin
-  if session_id is null then
+  if p_session_id is null then
     raise exception 'Session not found';
   end if;
 
   select * into sess
   from victory_calamba.sessions
-  where id = session_id
+  where id = p_session_id
   for update;
 
   if not found then
@@ -209,9 +211,9 @@ begin
   end if;
 
   select count(*) into still_in
-  from victory_calamba.attendance
-  where session_id = sess.id
-    and time_out is null;
+  from victory_calamba.attendance a
+  where a.session_id = sess.id
+    and a.time_out is null;
 
   if still_in > 0 then
     raise exception '% child(ren) still checked in. Check them out before deleting this session.', still_in;

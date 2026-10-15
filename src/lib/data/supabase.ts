@@ -328,7 +328,7 @@ export const supabaseRepository: KidsRepository = {
     // Locks the session, blocks while time_out is null, and closes an open
     // session in the same update. See 08_sessions_deleted_at.sql.
     const { error } = await db().rpc("soft_delete_session", {
-      session_id: sessionId,
+      p_session_id: sessionId,
     });
     if (error) throwDb(error, "Could not remove session");
   },
